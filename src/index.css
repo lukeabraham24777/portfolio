@@ -1,0 +1,14 @@
+:root { font-family: 'Courier New', monospace; }
+body, html, #root { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background: #050505; }
+
+.os-window {
+  position: absolute; top: 10%; left: 10%; width: 80%; height: 80%; 
+  background: #0a0a0a; color: #4ade80; border: 2px solid #4ade80; 
+  padding: 2rem; z-index: 100; display: flex; flex-direction: column;
+}
+
+.crt-lines {
+  position: absolute; inset: 0; pointer-events: none; z-index: 110;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+  background-size: 100% 4px;
+}
