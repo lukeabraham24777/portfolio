@@ -12,3 +12,8 @@ body, html, #root { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow
   background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
   background-size: 100% 4px;
 }
+
+/* Hide cursor when using computer */
+.cursor-hidden, .cursor-hidden * {
+  cursor: none !important;
+}
