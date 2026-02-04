@@ -274,13 +274,13 @@ const Aurora = () => {
         ribbons *= sin(normalizedAngle * 15.0 + curtainEffect * 3.0 - time * 0.5) * 0.5 + 0.5;
         
         float bottomWave = snoise(vec3(normalizedAngle * 10.0, time * 0.5, 0.0)) * 0.1;
-        float dynamicHeightFade = smoothstep(0.15 + bottomWave, 0.35, vUv.y) * smoothstep(0.75, 0.45 + bottomWave * 0.5, vUv.y);
-        
+        float dynamicHeightFade = smoothstep(0.05 + bottomWave, 0.25, vUv.y) * smoothstep(0.85, 0.35 + bottomWave * 0.5, vUv.y);
+
         float intensityNoise = snoise(vec3(normalizedAngle * 3.0, time * 0.2, 1.0)) * 0.5 + 0.5;
-        
-        float alpha = ribbons * dynamicHeightFade * (0.3 + intensityNoise * 0.4);
-        alpha *= curtainEffect * 0.5 + 0.7;
-        alpha = clamp(alpha * 0.5, 0.0, 0.6);
+
+        float alpha = ribbons * dynamicHeightFade * (0.5 + intensityNoise * 0.5);
+        alpha *= curtainEffect * 0.5 + 0.8;
+        alpha = clamp(alpha * 0.8, 0.0, 0.8);
         
         vec3 colorGreen = vec3(0.2, 0.95, 0.4);
         vec3 colorCyan = vec3(0.1, 0.8, 0.7);
@@ -302,7 +302,292 @@ const Aurora = () => {
     transparent: true, blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false,
   }), [])
   useFrame((state) => { material.uniforms.uTime.value = state.clock.getElapsedTime() })
-  return (<mesh position={[0, -100, 0]}><sphereGeometry args={[1800, 64, 64]} /><primitive object={material} attach="material" /></mesh>)
+  return (<mesh position={[0, 200, 0]}><sphereGeometry args={[1800, 64, 64]} /><primitive object={material} attach="material" /></mesh>)
+}
+
+// Vibrant close-up aurora curtains
+const VibrantAurora = () => {
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vPos;
+      void main() {
+        vUv = uv;
+        vPos = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+      varying vec3 vPos;
+
+      vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+      vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+      vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+      vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+      float snoise(vec3 v) {
+        const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+        const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+        vec3 i = floor(v + dot(v, C.yyy));
+        vec3 x0 = v - i + dot(i, C.xxx);
+        vec3 g = step(x0.yzx, x0.xyz);
+        vec3 l = 1.0 - g;
+        vec3 i1 = min(g.xyz, l.zxy);
+        vec3 i2 = max(g.xyz, l.zxy);
+        vec3 x1 = x0 - i1 + C.xxx;
+        vec3 x2 = x0 - i2 + C.yyy;
+        vec3 x3 = x0 - D.yyy;
+        i = mod289(i);
+        vec4 p = permute(permute(permute(
+          i.z + vec4(0.0, i1.z, i2.z, 1.0))
+          + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+          + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+        float n_ = 0.142857142857;
+        vec3 ns = n_ * D.wyz - D.xzx;
+        vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+        vec4 x_ = floor(j * ns.z);
+        vec4 y_ = floor(j - 7.0 * x_);
+        vec4 x = x_ * ns.x + ns.yyyy;
+        vec4 y = y_ * ns.x + ns.yyyy;
+        vec4 h = 1.0 - abs(x) - abs(y);
+        vec4 b0 = vec4(x.xy, y.xy);
+        vec4 b1 = vec4(x.zw, y.zw);
+        vec4 s0 = floor(b0) * 2.0 + 1.0;
+        vec4 s1 = floor(b1) * 2.0 + 1.0;
+        vec4 sh = -step(h, vec4(0.0));
+        vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+        vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+        vec3 p0 = vec3(a0.xy, h.x);
+        vec3 p1 = vec3(a0.zw, h.y);
+        vec3 p2 = vec3(a1.xy, h.z);
+        vec3 p3 = vec3(a1.zw, h.w);
+        vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+        p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+        vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+        m = m * m;
+        return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+      }
+
+      void main() {
+        float time = uTime * 0.1;
+
+        // Create flowing curtain effect
+        float n1 = snoise(vec3(vUv.x * 3.0, vUv.y * 0.5 + time, time * 0.5));
+        float n2 = snoise(vec3(vUv.x * 5.0 + 10.0, vUv.y * 0.8 + time * 0.7, time * 0.3));
+        float n3 = snoise(vec3(vUv.x * 2.0 + 20.0, vUv.y * 0.3 + time * 0.4, time * 0.6));
+
+        // Vertical ribbons
+        float ribbon1 = sin(vUv.x * 15.0 + n1 * 4.0 + time * 2.0) * 0.5 + 0.5;
+        float ribbon2 = sin(vUv.x * 10.0 + n2 * 3.0 - time * 1.5) * 0.5 + 0.5;
+
+        // Combine ribbons
+        float ribbons = ribbon1 * 0.6 + ribbon2 * 0.4;
+        ribbons = pow(ribbons, 1.5);
+
+        // Height fade - visible in upper portion
+        float heightFade = smoothstep(0.0, 0.3, vUv.y) * smoothstep(1.0, 0.5, vUv.y);
+
+        // Horizontal wave
+        float wave = sin(vUv.x * 3.14159 + time) * 0.2 + 0.8;
+
+        float alpha = ribbons * heightFade * wave * (0.6 + n3 * 0.4);
+
+        // Vibrant green colors like the reference
+        vec3 green1 = vec3(0.1, 1.0, 0.4);
+        vec3 green2 = vec3(0.2, 0.9, 0.5);
+        vec3 cyan = vec3(0.1, 0.8, 0.6);
+
+        vec3 color = mix(green1, green2, n1 * 0.5 + 0.5);
+        color = mix(color, cyan, vUv.y * 0.3);
+
+        // Brighten
+        color *= 1.5;
+
+        gl_FragColor = vec4(color * alpha, alpha * 0.7);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  }), [])
+
+  useFrame((state) => { material.uniforms.uTime.value = state.clock.getElapsedTime() })
+
+  return (
+    <group>
+      {/* Main aurora curtain behind scene */}
+      <mesh position={[0, 150, -400]} rotation={[0.2, 0, 0]}>
+        <planeGeometry args={[800, 300, 1, 1]} />
+        <primitive object={material} attach="material" />
+      </mesh>
+      {/* Left curtain */}
+      <mesh position={[-300, 120, -200]} rotation={[0.15, 0.5, 0]}>
+        <planeGeometry args={[400, 250, 1, 1]} />
+        <primitive object={material.clone()} attach="material" />
+      </mesh>
+      {/* Right curtain */}
+      <mesh position={[300, 130, -250]} rotation={[0.15, -0.4, 0]}>
+        <planeGeometry args={[450, 280, 1, 1]} />
+        <primitive object={material.clone()} attach="material" />
+      </mesh>
+    </group>
+  )
+}
+
+// Wavy ribbon aurora like the reference image
+const OverheadAurora = () => {
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+          mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+          f.y
+        );
+      }
+
+      float fbm(vec2 p) {
+        float v = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 6; i++) {
+          v += a * noise(p);
+          p *= 2.0;
+          a *= 0.5;
+        }
+        return v;
+      }
+
+      void main() {
+        float time = uTime * 0.04;
+        vec2 uv = vUv;
+
+        // Create curved ribbon paths across the sky
+        // Each ribbon follows a wavy path
+
+        float glow = 0.0;
+        vec3 totalColor = vec3(0.0);
+
+        // Ribbon 1 - main sweeping curve from left
+        float wave1 = sin(uv.x * 2.5 + time) * 0.15 + sin(uv.x * 1.2 - time * 0.5) * 0.1;
+        float ribbon1Center = 0.5 + wave1 + fbm(vec2(uv.x * 0.8 + time * 0.2, 0.0)) * 0.15;
+        float ribbon1Dist = abs(uv.y - ribbon1Center);
+        float ribbon1Width = 0.08 + fbm(vec2(uv.x * 2.0 + time * 0.1, 1.0)) * 0.06;
+        float ribbon1 = smoothstep(ribbon1Width, 0.0, ribbon1Dist);
+        ribbon1 *= smoothstep(0.0, 0.2, uv.x) * smoothstep(1.0, 0.7, uv.x);
+
+        // Ribbon 2 - crossing from right side
+        float wave2 = sin(uv.x * 2.0 - time * 0.8) * 0.12 + cos(uv.x * 1.5 + time * 0.3) * 0.08;
+        float ribbon2Center = 0.6 + wave2 + fbm(vec2(uv.x * 0.6 - time * 0.15, 2.0)) * 0.12;
+        float ribbon2Dist = abs(uv.y - ribbon2Center);
+        float ribbon2Width = 0.06 + fbm(vec2(uv.x * 1.5 - time * 0.1, 3.0)) * 0.05;
+        float ribbon2 = smoothstep(ribbon2Width, 0.0, ribbon2Dist);
+        ribbon2 *= smoothstep(0.1, 0.4, uv.x) * smoothstep(1.0, 0.6, uv.x);
+
+        // Ribbon 3 - lower sweeping band
+        float wave3 = sin(uv.x * 3.0 + time * 0.6) * 0.1 + sin(uv.x * 0.8 - time * 0.2) * 0.15;
+        float ribbon3Center = 0.35 + wave3 + fbm(vec2(uv.x * 0.5 + time * 0.1, 4.0)) * 0.1;
+        float ribbon3Dist = abs(uv.y - ribbon3Center);
+        float ribbon3Width = 0.05 + fbm(vec2(uv.x * 1.8 + time * 0.05, 5.0)) * 0.04;
+        float ribbon3 = smoothstep(ribbon3Width, 0.0, ribbon3Dist);
+        ribbon3 *= smoothstep(0.0, 0.3, uv.x) * smoothstep(1.0, 0.5, uv.x);
+
+        // Combine ribbons with soft glow
+        glow = ribbon1 * 0.7 + ribbon2 * 0.5 + ribbon3 * 0.4;
+
+        // Add diffuse outer glow around ribbons
+        float outerGlow1 = smoothstep(ribbon1Width * 4.0, 0.0, ribbon1Dist) * 0.3;
+        float outerGlow2 = smoothstep(ribbon2Width * 4.0, 0.0, ribbon2Dist) * 0.25;
+        float outerGlow3 = smoothstep(ribbon3Width * 4.0, 0.0, ribbon3Dist) * 0.2;
+        float outerGlow = outerGlow1 + outerGlow2 + outerGlow3;
+
+        glow += outerGlow * 0.5;
+
+        // Soft noise modulation for natural variation
+        float noiseMod = fbm(uv * 3.0 + time * 0.1) * 0.4 + 0.6;
+        glow *= noiseMod;
+
+        // Edge fade
+        float edgeFade = smoothstep(0.0, 0.15, uv.x) * smoothstep(1.0, 0.85, uv.x);
+        edgeFade *= smoothstep(0.0, 0.1, uv.y) * smoothstep(1.0, 0.9, uv.y);
+        glow *= edgeFade;
+
+        // COLOR GRADIENT: deep blue at edges -> green core -> white at brightest peaks
+        vec3 deepBlue = vec3(0.1, 0.15, 0.6);    // Strong blue
+        vec3 blue = vec3(0.15, 0.3, 0.7);         // Medium blue
+        vec3 teal = vec3(0.1, 0.55, 0.6);         // Blue-green transition
+        vec3 green = vec3(0.2, 0.9, 0.45);        // Vibrant green
+        vec3 brightGreen = vec3(0.5, 1.0, 0.55);  // Bright green
+        vec3 whiteGreen = vec3(0.8, 1.0, 0.85);   // White-ish for peaks
+
+        // Color based on distance from ribbon center (not just intensity)
+        // Outer edges = blue, inner core = green, very center = white
+        float coreIntensity = glow;
+
+        // Start with blue for the diffuse outer glow
+        vec3 color = deepBlue;
+
+        // Transition through colors based on intensity
+        color = mix(color, blue, smoothstep(0.05, 0.15, coreIntensity));
+        color = mix(color, teal, smoothstep(0.12, 0.25, coreIntensity));
+        color = mix(color, green, smoothstep(0.2, 0.4, coreIntensity));
+        color = mix(color, brightGreen, smoothstep(0.35, 0.6, coreIntensity));
+        color = mix(color, whiteGreen, smoothstep(0.5, 0.85, coreIntensity) * 0.7);
+
+        // Ensure blue shows in outer glow regions
+        float outerRegion = outerGlow / (glow + 0.001);
+        color = mix(color, deepBlue * 1.5, outerRegion * 0.4);
+
+        // Final output - lower multiplier to prevent washing out
+        float alpha = glow * 0.6;
+        alpha = pow(alpha, 0.7);
+
+        gl_FragColor = vec4(color * (0.8 + coreIntensity * 0.7), alpha * 0.65);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  }), [])
+
+  useFrame((state) => { material.uniforms.uTime.value = state.clock.getElapsedTime() })
+
+  return (
+    <group>
+      {/* Main aurora sheet - large coverage */}
+      <mesh position={[0, 60, -40]} rotation={[-1.1, 0, 0]}>
+        <planeGeometry args={[350, 200, 1, 1]} />
+        <primitive object={material} attach="material" />
+      </mesh>
+      {/* Second layer offset for depth */}
+      <mesh position={[30, 80, -100]} rotation={[-0.9, -0.1, 0.1]}>
+        <planeGeometry args={[300, 180, 1, 1]} />
+        <primitive object={material.clone()} attach="material" />
+      </mesh>
+    </group>
+  )
 }
 
 const MountainRange = () => {
@@ -335,12 +620,100 @@ const Fireplace = ({ position, active }) => {
 }
 const Computer = ({ pcOn, isSitting }) => {
   const screenMat = useRef()
-  
+  const [hoveredButton, setHoveredButton] = useState(null)
+  const containerRef = useRef(null)
+  const cursorRef = useRef(null)
+
+  // Store cursor position
+  const cursorPosRef = useRef({ x: 350, y: 200 })
+
+  // Button hitboxes (x, y, width, height) - positions relative to container
+  // These will be at the bottom of the screen in the button area
+  const buttons = [
+    { id: 'projects', label: '[PROJECTS.EXE]', color: '#38bdf8', x: 24, y: 340, width: 120, height: 36, action: 'Project Alpha Loaded' },
+    { id: 'resume', label: '[RESUME.PDF]', color: '#a855f7', x: 160, y: 340, width: 110, height: 36, action: 'Resume.pdf downloaded' },
+    { id: 'contact', label: '[CONTACT.SH]', color: '#4ade80', x: 286, y: 340, width: 110, height: 36, action: 'Contact info loaded' },
+  ]
+
+  // Check if cursor is within a button's bounds
+  const getButtonAtCursor = (cx, cy) => {
+    for (const btn of buttons) {
+      if (cx >= btn.x && cx <= btn.x + btn.width && cy >= btn.y && cy <= btn.y + btn.height) {
+        return btn
+      }
+    }
+    return null
+  }
+
+  // Track mouse movement and clicks
+  useEffect(() => {
+    if (!pcOn || !isSitting) return
+
+    const CONTAINER_WIDTH = 760
+    const CONTAINER_HEIGHT = 440
+    const CURSOR_SIZE = 24
+
+    const handleMouseMove = (e) => {
+      if (!cursorRef.current) return
+
+      // Update cursor position
+      cursorPosRef.current.x += (e.movementX || 0)
+      cursorPosRef.current.y += (e.movementY || 0)
+
+      // Clamp to container bounds
+      cursorPosRef.current.x = Math.max(0, Math.min(CONTAINER_WIDTH - CURSOR_SIZE, cursorPosRef.current.x))
+      cursorPosRef.current.y = Math.max(0, Math.min(CONTAINER_HEIGHT - CURSOR_SIZE, cursorPosRef.current.y))
+
+      cursorRef.current.style.transform = `translate(${cursorPosRef.current.x}px, ${cursorPosRef.current.y}px)`
+
+      // Check hover state
+      const hovered = getButtonAtCursor(cursorPosRef.current.x + CURSOR_SIZE / 2, cursorPosRef.current.y + CURSOR_SIZE / 2)
+      setHoveredButton(hovered?.id || null)
+    }
+
+    const handleClick = () => {
+      // Check which button (if any) the cursor is over
+      const btn = getButtonAtCursor(cursorPosRef.current.x + 12, cursorPosRef.current.y + 12)
+      if (btn) {
+        alert(btn.action)
+      }
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mousedown', handleClick)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mousedown', handleClick)
+    }
+  }, [pcOn, isSitting])
+
   useFrame((state) => {
     if (screenMat.current) {
       const targetIntensity = pcOn ? 0.8 : 0
       screenMat.current.emissiveIntensity = THREE.MathUtils.lerp(screenMat.current.emissiveIntensity, targetIntensity, 0.1)
     }
+  })
+
+  const getButtonStyle = (btn) => ({
+    position: 'absolute',
+    left: btn.x + 'px',
+    top: btn.y + 'px',
+    width: btn.width + 'px',
+    height: btn.height + 'px',
+    background: hoveredButton === btn.id ? btn.color : 'transparent',
+    border: `2px solid ${btn.color}`,
+    color: hoveredButton === btn.id ? '#0a0f1a' : btn.color,
+    fontSize: '12px',
+    fontFamily: "'Courier New', monospace",
+    fontWeight: 'bold',
+    textShadow: hoveredButton === btn.id ? 'none' : `0 0 5px ${btn.color}`,
+    boxShadow: hoveredButton === btn.id ? `0 0 25px ${btn.color}` : `0 0 10px ${btn.color}33`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+    zIndex: 10,
   })
 
   return (
@@ -352,256 +725,135 @@ const Computer = ({ pcOn, isSitting }) => {
 
       <mesh position={[0, 0, 0.06]}>
         <planeGeometry args={[4.2, 2.5]} />
-        <meshStandardMaterial 
-          ref={screenMat} 
-          emissive={pcOn ? "#0c1b3d" : "#000"} 
-          color="#000" 
+        <meshStandardMaterial
+          ref={screenMat}
+          emissive={pcOn ? "#0c1b3d" : "#000"}
+          color="#000"
         />
       </mesh>
+
+      {/* Screen UI rendered in 3D space */}
+      {pcOn && isSitting && (
+        <Html
+          transform
+          position={[0, 0, 0.08]}
+          scale={0.21}
+        >
+          <div
+            ref={containerRef}
+            style={{
+              width: '760px',
+              height: '440px',
+              background: '#0a0f1a',
+              color: 'white',
+              fontFamily: "'Courier New', monospace",
+              padding: '24px',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: 'inset 0 0 80px rgba(56, 189, 248, 0.1)',
+              userSelect: 'none',
+              cursor: 'none',
+              position: 'relative',
+            }}
+          >
+            {/* CRT Scanlines */}
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px)',
+              pointerEvents: 'none',
+              zIndex: 100,
+              borderRadius: '8px',
+            }} />
+
+            {/* CRT Vignette */}
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.4) 100%)',
+              pointerEvents: 'none',
+              zIndex: 99,
+              borderRadius: '8px',
+            }} />
+
+            {/* Retro Cursor */}
+            <div
+              ref={cursorRef}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: '24px',
+                height: '28px',
+                pointerEvents: 'none',
+                zIndex: 1000,
+                willChange: 'transform',
+              }}
+            >
+              <svg width="24" height="28" viewBox="0 0 20 24">
+                <polygon
+                  points="0,0 0,20 5,15 9,23 12,22 8,14 14,14"
+                  fill={hoveredButton ? "#38bdf8" : "#fff"}
+                  stroke="#000"
+                  strokeWidth="1.5"
+                />
+              </svg>
+            </div>
+
+            {/* Content */}
+            <h1 style={{
+              color: '#38bdf8',
+              fontSize: '24px',
+              textShadow: '0 0 15px #38bdf8',
+              marginBottom: '8px',
+              position: 'relative',
+              zIndex: 10,
+            }}>
+              {'>'} SYSTEM_ONLINE
+            </h1>
+            <p style={{
+              fontSize: '12px',
+              color: '#94a3b8',
+              marginBottom: '16px',
+              position: 'relative',
+              zIndex: 10,
+            }}>
+              Welcome to the portfolio terminal. Select an option below.
+            </p>
+
+            {/* Button hitboxes - rendered as divs */}
+            {buttons.map(btn => (
+              <div key={btn.id} style={getButtonStyle(btn)}>
+                {btn.label}
+              </div>
+            ))}
+
+            {/* Bottom status bar */}
+            <div style={{
+              position: 'absolute',
+              bottom: '24px',
+              left: '24px',
+              right: '24px',
+              paddingTop: '8px',
+              borderTop: '1px solid #1e3a5f',
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: '10px',
+              color: '#475569',
+              zIndex: 10,
+            }}>
+              <span>USER: GUEST</span>
+              <span style={{ color: '#4ade80' }}>● ONLINE</span>
+              <span>ESC TO EXIT</span>
+            </div>
+          </div>
+        </Html>
+      )}
     </group>
   )
 }
-
-// Separate component for the computer UI overlay - rendered outside of Three.js
-const ComputerUIOverlay = ({ pcOn, isSitting }) => {
-  const [isHovering, setIsHovering] = useState(false)
-  const containerRef = useRef(null)
-  const cursorRef = useRef(null)
-  
-  // Release pointer lock when PC turns on
-  useEffect(() => {
-    if (pcOn && isSitting) {
-      if (document.pointerLockElement) {
-        document.exitPointerLock()
-      }
-    }
-  }, [pcOn, isSitting])
-
-  // Track mouse movement using direct DOM manipulation for performance
-  useEffect(() => {
-    if (!pcOn || !isSitting) return
-
-    const handleMouseMove = (e) => {
-      if (!containerRef.current || !cursorRef.current) return
-      
-      const rect = containerRef.current.getBoundingClientRect()
-      
-      // Calculate position in pixels relative to container
-      let x = e.clientX - rect.left
-      let y = e.clientY - rect.top
-      
-      // Clamp to container bounds
-      x = Math.max(0, Math.min(rect.width, x))
-      y = Math.max(0, Math.min(rect.height, y))
-      
-      // Direct DOM update - no React state, no re-render
-      cursorRef.current.style.transform = `translate(${x - 2}px, ${y - 2}px)`
-    }
-
-    // Use passive listener for better performance
-    window.addEventListener('mousemove', handleMouseMove, { passive: true })
-    return () => window.removeEventListener('mousemove', handleMouseMove)
-  }, [pcOn, isSitting])
-
-  if (!pcOn || !isSitting) return null
-
-  const buttonStyle = (color) => ({
-    padding: '12px 24px',
-    background: 'transparent',
-    border: `2px solid ${color}`,
-    cursor: 'none',
-    fontSize: '14px',
-    fontFamily: "'Courier New', monospace",
-    fontWeight: 'bold',
-    color: color,
-    textShadow: `0 0 5px ${color}`,
-    transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
-    boxShadow: `0 0 10px ${color}33`,
-    position: 'relative',
-    zIndex: 10,
-  })
-
-  const handleButtonClick = (action) => {
-    alert(action)
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        position: 'fixed',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: '60vw',
-        maxWidth: '800px',
-        height: '45vh',
-        maxHeight: '500px',
-        background: '#0a0f1a',
-        color: 'white',
-        fontFamily: "'Courier New', monospace",
-        padding: '30px',
-        borderRadius: '12px',
-        border: '4px solid #1e3a5f',
-        display: 'flex',
-        flexDirection: 'column',
-        cursor: 'none',
-        overflow: 'hidden',
-        boxShadow: '0 0 60px rgba(56, 189, 248, 0.3), inset 0 0 100px rgba(56, 189, 248, 0.1)',
-        zIndex: 1000,
-      }}
-    >
-      {/* CRT Scanlines */}
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px)',
-        pointerEvents: 'none',
-        zIndex: 100,
-        borderRadius: '8px',
-      }} />
-      
-      {/* CRT Vignette */}
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        background: 'radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.4) 100%)',
-        pointerEvents: 'none',
-        zIndex: 99,
-        borderRadius: '8px',
-      }} />
-
-      {/* Retro Cursor - using ref for direct DOM updates */}
-      <div 
-        ref={cursorRef}
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: '24px',
-          height: '28px',
-          pointerEvents: 'none',
-          zIndex: 1000,
-          willChange: 'transform',
-        }}
-      >
-        <svg width="24" height="28" viewBox="0 0 20 24">
-          <polygon 
-            points="0,0 0,20 5,15 9,23 12,22 8,14 14,14" 
-            fill={isHovering ? "#38bdf8" : "#fff"}
-            stroke="#000"
-            strokeWidth="1.5"
-          />
-        </svg>
-      </div>
-
-      {/* Content */}
-      <h1 style={{ 
-        color: '#38bdf8', 
-        fontSize: '28px',
-        textShadow: '0 0 15px #38bdf8',
-        marginBottom: '10px',
-        position: 'relative',
-        zIndex: 10,
-      }}>
-        {'>'} SYSTEM_ONLINE
-      </h1>
-      <p style={{ 
-        fontSize: '14px', 
-        color: '#94a3b8',
-        marginBottom: '20px',
-        position: 'relative',
-        zIndex: 10,
-      }}>
-        Welcome to the portfolio terminal. Select an option below.
-      </p>
-      
-      <div style={{ 
-        marginTop: 'auto', 
-        display: 'flex', 
-        gap: '20px',
-        flexWrap: 'wrap',
-        position: 'relative',
-        zIndex: 10,
-      }}>
-        <button 
-          onClick={() => handleButtonClick("Project Alpha Loaded")}
-          onMouseEnter={() => setIsHovering(true)}
-          onMouseLeave={() => setIsHovering(false)}
-          style={buttonStyle('#38bdf8')}
-          onMouseOver={(e) => {
-            e.currentTarget.style.background = '#38bdf8'
-            e.currentTarget.style.color = '#0a0f1a'
-            e.currentTarget.style.boxShadow = '0 0 25px rgba(56, 189, 248, 0.7)'
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = '#38bdf8'
-            e.currentTarget.style.boxShadow = '0 0 10px rgba(56, 189, 248, 0.3)'
-          }}
-        >
-          [PROJECTS.EXE]
-        </button>
-        <button 
-          onClick={() => handleButtonClick("Resume.pdf downloaded")}
-          onMouseEnter={() => setIsHovering(true)}
-          onMouseLeave={() => setIsHovering(false)}
-          style={buttonStyle('#a855f7')}
-          onMouseOver={(e) => {
-            e.currentTarget.style.background = '#a855f7'
-            e.currentTarget.style.color = '#0a0f1a'
-            e.currentTarget.style.boxShadow = '0 0 25px rgba(168, 85, 247, 0.7)'
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = '#a855f7'
-            e.currentTarget.style.boxShadow = '0 0 10px rgba(168, 85, 247, 0.3)'
-          }}
-        >
-          [RESUME.PDF]
-        </button>
-        <button 
-          onClick={() => handleButtonClick("Contact info loaded")}
-          onMouseEnter={() => setIsHovering(true)}
-          onMouseLeave={() => setIsHovering(false)}
-          style={buttonStyle('#4ade80')}
-          onMouseOver={(e) => {
-            e.currentTarget.style.background = '#4ade80'
-            e.currentTarget.style.color = '#0a0f1a'
-            e.currentTarget.style.boxShadow = '0 0 25px rgba(74, 222, 128, 0.7)'
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = '#4ade80'
-            e.currentTarget.style.boxShadow = '0 0 10px rgba(74, 222, 128, 0.3)'
-          }}
-        >
-          [CONTACT.SH]
-        </button>
-      </div>
-      
-      {/* Bottom status bar */}
-      <div style={{
-        marginTop: '20px',
-        paddingTop: '10px',
-        borderTop: '1px solid #1e3a5f',
-        display: 'flex',
-        justifyContent: 'space-between',
-        fontSize: '12px',
-        color: '#475569',
-        position: 'relative',
-        zIndex: 10,
-      }}>
-        <span>USER: GUEST</span>
-        <span style={{ color: '#4ade80' }}>● ONLINE</span>
-        <span>ESC TO EXIT</span>
-      </div>
-    </div>
-  )
-}
-
-// Export for use in App.jsx
-export { ComputerUIOverlay }
 
 const Peripherals = () => {
   return (
@@ -763,6 +1015,16 @@ export const Scene = () => {
   // Audio refs for sound effects
   const keyboardSound = useRef(null)
   const mouseClickSound = useRef(null)
+  const catSound = useRef(null)
+  const chairSound = useRef(null)
+  const fireplaceSound = useRef(null)
+  const lampSound = useRef(null)
+  const mainMusic = useRef(null)
+  const windSound = useRef(null)
+  const windIntervalRef = useRef(null)
+  const prevCatPosition = useRef(catPosition)
+  const prevView = useRef(view)
+  const prevLampOn = useRef(lampOn)
   
   const sitPos = useMemo(() => new THREE.Vector3(0, 3.8, 3.5), []) 
   const deskLookAt = useMemo(() => new THREE.Vector3(0, 3.5, 11.5), [])

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { Scene, ComputerUIOverlay } from './components/Scene'
+import { Scene } from './components/Scene'
 import { Overlay } from './components/Overlay'
 import { useStore } from './store'
 
@@ -203,7 +203,6 @@ function App() {
         <Scene />
       </Canvas>
       <Overlay />
-      <ComputerUIOverlay pcOn={pcOn} isSitting={isSitting} />
       <InstructionsOverlay visible={wakeUpComplete && !pcOn && view === 'orbit'} />
     </div>
   )
