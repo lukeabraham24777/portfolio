@@ -19,6 +19,10 @@ const VOLUMES = {
 }
 // ────────────────────────────────────────────────────────────────────────────
 
+// ─── PROMPT Y POSITION — increase to move the interaction prompt lower ────
+const PROMPT_TOP_PX = 80  // pixels from the top of the viewport
+// ────────────────────────────────────────────────────────────────────────────
+
 // ─── BASKETBALL CONSTANTS — adjust to tune gameplay ──────────────────────
 const SHOT_METER_SPEED = 0.55    // full swings per second (higher = faster bar)
 const SHOT_GOOD_ZONE   = 0.14   // fraction below 1.0 that counts as a good shot
@@ -109,27 +113,51 @@ const DetailedCat = ({ targetPosition, active, isAtFireplace, isHovered, canInte
   const earLeftRef = useRef()
   const earRightRef = useRef()
   const catScaleRef = useRef(1)
-  const targetVec = new THREE.Vector3()
+  const targetVec = useMemo(() => new THREE.Vector3(), [])
+
+  // Snap to starting position on first mount (prevents underground teleport from origin)
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(targetPosition[0], targetPosition[1], targetPosition[2])
+      // Face the computer (-Z direction) from the start
+      groupRef.current.rotation.set(0, Math.PI, 0)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useFrame((state) => {
     if (!groupRef.current) return
     targetVec.set(...targetPosition)
     groupRef.current.position.lerp(targetVec, 0.05)
     const distance = groupRef.current.position.distanceTo(targetVec)
-    if (distance > 0.1) {
-      const lookTarget = new THREE.Vector3(targetVec.x, groupRef.current.position.y, targetVec.z)
-      groupRef.current.lookAt(lookTarget)
+
+    if (distance > 0.15) {
+      // Moving: face direction of travel using atan2 (no lookAt to avoid X/Z tilt bugs)
+      const dx = targetVec.x - groupRef.current.position.x
+      const dz = targetVec.z - groupRef.current.position.z
+      if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
+        const travelYRot = Math.atan2(dx, dz)
+        groupRef.current.rotation.y = THREE.MathUtils.lerp(groupRef.current.rotation.y, travelYRot, 0.15)
+      }
+      // Gentle body sway while walking — X and Z always return to 0
       groupRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 10) * 0.05
+      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, 0, 0.1)
     } else {
-      const targetRotation = isAtFireplace ? Math.PI : 0
-      groupRef.current.rotation.y = THREE.MathUtils.lerp(groupRef.current.rotation.y, targetRotation, 0.1)
+      // Settled at destination
+      groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, 0, 0.1)
+      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, 0, 0.1)
+      // At chair → face the computer (−Z = Math.PI); at fireplace → face the fire (also −Z)
+      const restRot = Math.PI
+      groupRef.current.rotation.y = THREE.MathUtils.lerp(groupRef.current.rotation.y, restRot, 0.1)
     }
+
     if (isAtFireplace && distance < 0.2) {
       groupRef.current.position.y = targetPosition[1] + Math.sin(state.clock.elapsedTime * 1.5) * 0.04
       if (tailRef.current) tailRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 2) * 0.3
       if (earLeftRef.current) earLeftRef.current.rotation.z = -0.2 + Math.sin(state.clock.elapsedTime * 3) * 0.06
       if (earRightRef.current) earRightRef.current.rotation.z = 0.2 + Math.sin(state.clock.elapsedTime * 3.5) * 0.06
     }
+
     const scaleTarget = (isHovered && canInteract) ? 1.08 : 1.0
     catScaleRef.current = THREE.MathUtils.lerp(catScaleRef.current, scaleTarget, 0.1)
     groupRef.current.scale.setScalar(catScaleRef.current)
@@ -692,6 +720,56 @@ const Fireplace = ({ position, active }) => {
   )
 }
 
+// ─── CONFETTI PARTICLE ───────────────────────────────────────────────────
+const CONFETTI_COLORS = ['#ff4444', '#44ff88', '#4488ff', '#ffff44', '#ff44ff', '#44ffff', '#ffaa44']
+const ConfettiParticle = ({ initPos, vel, color }) => {
+  const meshRef = useRef()
+  const lifeRef = useRef(0)
+  const velRef = useRef([...vel])
+  useFrame((state, delta) => {
+    if (!meshRef.current) return
+    lifeRef.current += delta
+    velRef.current[1] -= 12 * delta // gravity
+    meshRef.current.position.x += velRef.current[0] * delta
+    meshRef.current.position.y += velRef.current[1] * delta
+    meshRef.current.position.z += velRef.current[2] * delta
+    meshRef.current.rotation.x += 4 * delta
+    meshRef.current.rotation.z += 3 * delta
+    const opacity = Math.max(0, 1 - lifeRef.current / 2.5)
+    if (meshRef.current.material) meshRef.current.material.opacity = opacity
+  })
+  return (
+    <mesh ref={meshRef} position={initPos}>
+      <planeGeometry args={[0.22, 0.14]} />
+      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.6} transparent opacity={1} side={THREE.DoubleSide} depthWrite={false} />
+    </mesh>
+  )
+}
+
+const ConfettiEmitter = ({ active }) => {
+  const particles = useMemo(() => {
+    if (!active) return []
+    return Array.from({ length: 40 }, (_, i) => ({
+      initPos: [
+        HOOP_RIM_WORLD.x + (Math.random() - 0.5) * 2.5,
+        HOOP_RIM_WORLD.y + 0.3,
+        HOOP_RIM_WORLD.z + (Math.random() - 0.5) * 2.5,
+      ],
+      vel: [(Math.random() - 0.5) * 12, 4 + Math.random() * 7, (Math.random() - 0.5) * 12],
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
+
+  if (!active) return null
+  return (
+    <>
+      {particles.map((p, i) => <ConfettiParticle key={i} {...p} />)}
+    </>
+  )
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 // ─── ROCKET-POWERED BASKETBALL HOOP ──────────────────────────────────────
 const HoopWithThrusters = () => {
   const flameRefs = [useRef(), useRef(), useRef(), useRef()]
@@ -709,17 +787,17 @@ const HoopWithThrusters = () => {
     <group position={HOOP_POS} rotation={[0, HOOP_ROT_Y, 0]}>
 
       {/* ── BACKBOARD ── */}
-      {/* Main board — dark tinted glass */}
+      {/* Main board — dark tinted glass (enlarged) */}
       <mesh position={[0, 0, 0]} castShadow>
-        <boxGeometry args={[3.8, 2.6, 0.12]} />
+        <boxGeometry args={[5.4, 3.6, 0.12]} />
         <meshStandardMaterial color="#0a1025" transparent opacity={0.82} emissive="#1a2060" emissiveIntensity={0.25} />
       </mesh>
-      {/* Glowing border frame */}
+      {/* Glowing border frame (matches enlarged board) */}
       {[
-        [0,  1.36, 0.07, 3.84, 0.08, 0.1],
-        [0, -1.36, 0.07, 3.84, 0.08, 0.1],
-        [-1.96, 0, 0.07, 0.08, 2.72, 0.1],
-        [ 1.96, 0, 0.07, 0.08, 2.72, 0.1],
+        [0,   1.86, 0.07, 5.44, 0.09, 0.1],
+        [0,  -1.86, 0.07, 5.44, 0.09, 0.1],
+        [-2.76, 0, 0.07, 0.09, 3.72, 0.1],
+        [ 2.76, 0, 0.07, 0.09, 3.72, 0.1],
       ].map(([x, y, z, w, h, d], i) => (
         <mesh key={i} position={[x, y, z]}>
           <boxGeometry args={[w, h, d]} />
@@ -1239,6 +1317,7 @@ export const Scene = () => {
   const windSound = useRef(null)
   const windIntervalRef = useRef(null)
   const typingEffectSound = useRef(null)
+  const shotMakeSound = useRef(null)
   const musicStartedRef = useRef(false)
   const prevCatPosition = useRef(catPosition)
   const prevView = useRef(view)
@@ -1254,7 +1333,7 @@ export const Scene = () => {
   const proximityPromptRef = useRef(null)
 
   // Track first-interaction per object (for proximity prompts)
-  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false, basketball: false })
+  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false, basketball: false, shot: false })
 
   // Precomputed world positions for proximity checks
   const lampWorldPos = useMemo(() => new THREE.Vector3(-40, 1.5, 50), [])
@@ -1273,7 +1352,8 @@ export const Scene = () => {
   const cameraYOffsetRef = useRef(0)
   const chargeBarFillRef = useRef(null)
   const [holdingBall, setHoldingBall] = useState(false)
-  
+  const [confettiActive, setConfettiActive] = useState(false)
+
   const sitPos = useMemo(() => new THREE.Vector3(0, 3.8, 3.5), []) 
   const deskLookAt = useMemo(() => new THREE.Vector3(0, 3.5, 11.5), [])
 
@@ -1324,6 +1404,9 @@ export const Scene = () => {
     typingEffectSound.current = new Audio('/sounds/typingEffect.mp3')
     typingEffectSound.current.loop = true
     typingEffectSound.current.volume = VOLUMES.typingEffect
+
+    shotMakeSound.current = new Audio('/sounds/shotMake.mp3')
+    shotMakeSound.current.volume = 0.85
 
     // Attempt wind boost via Web Audio API GainNode (goes beyond HTMLAudio vol cap)
     try {
@@ -1460,6 +1543,8 @@ const handleKeyDown = (e) => {
         flightTRef.current = 0
         holdingBallRef.current = false
         setHoldingBall(false)
+        // Mark shot as attempted (hide the SPACE prompt)
+        hasInteractedRef.current.shot = true
         // Jump offset: camera pops up, then lerps back to 0
         cameraYOffsetRef.current = 0.6
       }
@@ -1546,6 +1631,13 @@ useEffect(() => {
     setZoomedIn(false)
   }
 }, [pcOn])
+
+// Release pointer lock the moment the player sits — ensures mouse is free for the PC
+useEffect(() => {
+  if (isSitting && document.pointerLockElement) {
+    document.exitPointerLock()
+  }
+}, [isSitting])
 
 
 // Add this useEffect after your other useEffects
@@ -1652,6 +1744,16 @@ useEffect(() => {
             0.55,
             target.z + (shotGoodRef.current ? 0 : 1.5)
           )
+          if (shotGoodRef.current) {
+            // Play make sound
+            if (shotMakeSound.current) {
+              shotMakeSound.current.currentTime = 0
+              shotMakeSound.current.play().catch(() => {})
+            }
+            // Trigger confetti burst (auto-clears after 3 s)
+            setConfettiActive(true)
+            setTimeout(() => setConfettiActive(false), 3000)
+          }
         }
       }
 
@@ -1684,10 +1786,18 @@ useEffect(() => {
       const distCat = camPos.distanceTo(catPos)
       const distChair = camPos.distanceTo(chairWorldPos)
 
+      // Basketball proximity — use ball's current world position
+      const ballPos = basketballRef.current ? basketballRef.current.position : new THREE.Vector3(...BALL_SPAWN)
+      const distBall = (!holdingBallRef.current && !ballInFlightRef.current)
+        ? camPos.distanceTo(ballPos) : Infinity
+
       let prompt = null
       if (!hasInteractedRef.current.lamp && distLamp < 15) prompt = 'the LAMP'
       if (!hasInteractedRef.current.cat && !lampOn && distCat < 9) prompt = 'the CAT'
       if (!hasInteractedRef.current.chair && catPosition === 'fireplace' && distChair < 9) prompt = 'the CHAIR'
+      if (!hasInteractedRef.current.basketball && distBall < 16) prompt = 'the BASKETBALL to pick up'
+      // Override with shot hint when holding (highest priority)
+      if (holdingBallRef.current && !hasInteractedRef.current.shot) prompt = 'SPACE to shoot'
 
       if (prompt !== proximityPromptRef.current) {
         proximityPromptRef.current = prompt
@@ -1722,8 +1832,8 @@ useEffect(() => {
       <Html calculatePosition={() => [0, 0, 0]} style={{ pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100vw', height: '100vh' }}>
         <style>{`
           @keyframes promptPulse {
-            0%, 100% { opacity: 0.6; transform: translateX(-50%) scale(1); }
-            50% { opacity: 1; transform: translateX(-50%) scale(1.07); }
+            0%, 100% { opacity: 0.75; transform: translateX(-50%) scale(1); }
+            50% { opacity: 1; transform: translateX(-50%) scale(1.05); }
           }
         `}</style>
         {!(isSitting && pcOn) && (
@@ -1735,7 +1845,7 @@ useEffect(() => {
         {proximityPrompt && !(isSitting && pcOn) && (
           <div style={{
             position: 'absolute',
-            top: '32px',
+            top: PROMPT_TOP_PX + 'px',
             left: '50%',
             transform: 'translateX(-50%)',
             color: '#a855f7',
@@ -1746,6 +1856,13 @@ useEffect(() => {
             animation: 'promptPulse 1.5s ease-in-out infinite',
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
+            // Same background box as the instructions overlay
+            padding: '10px 22px',
+            background: 'rgba(5, 5, 5, 0.80)',
+            border: '1px solid rgba(168, 85, 247, 0.55)',
+            boxShadow: '0 0 18px rgba(168, 85, 247, 0.25), inset 0 0 16px rgba(168, 85, 247, 0.06)',
+            backdropFilter: 'blur(4px)',
+            borderRadius: '4px',
           }}>
             ▶ <TypedText text={`CLICK to interact with ${proximityPrompt}`} />
           </div>
@@ -1764,31 +1881,31 @@ useEffect(() => {
             boxShadow: '0 0 14px rgba(168,85,247,0.4)',
             borderRadius: '4px',
             overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column-reverse',
             pointerEvents: 'none',
           }}>
-            {/* Green fill — grows from bottom, height driven by chargeBarFillRef in useFrame */}
+            {/* Green fill — anchored at BOTTOM, grows UP as chargeLevel rises */}
             <div
               ref={chargeBarFillRef}
               style={{
-                width: '100%',
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
                 height: '0%',
                 background: 'linear-gradient(to top, #22dd44, #aaff88)',
                 boxShadow: '0 0 12px #44ff66',
-                flexShrink: 0,
               }}
             />
-            {/* Good-zone indicator band at top (SHOT_GOOD_ZONE fraction) */}
+            {/* Good-zone band at TOP — release here for a MAKE */}
             <div style={{
               position: 'absolute',
-              bottom: `${(1 - SHOT_GOOD_ZONE) * 100}%`,
+              top: 0,
               left: 0,
               right: 0,
               height: `${SHOT_GOOD_ZONE * 100}%`,
-              background: 'rgba(255,255,80,0.12)',
+              background: 'rgba(255,255,80,0.18)',
               borderBottom: '2px solid #ffff44',
-              pointerEvents: 'none',
+              boxShadow: '0 0 6px #ffff44',
             }} />
           </div>
         )}
@@ -1849,6 +1966,7 @@ useEffect(() => {
 
       <HoopWithThrusters />
       <BasketballMesh meshRef={basketballRef} />
+      <ConfettiEmitter active={confettiActive} />
 
       <EffectComposer>
         <Bloom intensity={1.5} luminanceThreshold={0.8} />
