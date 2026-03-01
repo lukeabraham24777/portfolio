@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Scene } from './components/Scene'
 import { Overlay } from './components/Overlay'
@@ -178,9 +178,9 @@ function App() {
   const pcOn = useStore((state) => state.pcOn)
   const view = useStore((state) => state.view)
   const [wakeUpComplete, setWakeUpComplete] = useState(false)
-  const [showInstructions, setShowInstructions] = useState(true)
   
   const isSitting = view === 'room'
+  const handleWakeUpComplete = useCallback(() => setWakeUpComplete(true), [])
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') standUp() }
@@ -188,22 +188,9 @@ function App() {
     return () => window.removeEventListener('keydown', handleEsc)
   }, [standUp])
 
-  // Hide instructions when PC is on or player starts moving
-  useEffect(() => {
-    const handleInteraction = () => {
-      setTimeout(() => setShowInstructions(false), 3000)
-    }
-    window.addEventListener('click', handleInteraction, { once: true })
-    window.addEventListener('keydown', handleInteraction, { once: true })
-    return () => {
-      window.removeEventListener('click', handleInteraction)
-      window.removeEventListener('keydown', handleInteraction)
-    }
-  }, [])
-
   return (
     <div style={{ width: '100vw', height: '100vh', cursor: pcOn && isSitting ? 'none' : 'auto' }}>
-      <WakeUpOverlay onComplete={() => setWakeUpComplete(true)} />
+      <WakeUpOverlay onComplete={handleWakeUpComplete} />
       <Canvas>
         <Scene />
       </Canvas>
