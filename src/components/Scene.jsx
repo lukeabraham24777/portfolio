@@ -7,14 +7,63 @@ import * as THREE from 'three'
 
 // ─── VOLUME CONSTANTS — adjust these to change relative audio levels ───────
 const VOLUMES = {
-  mainMusic:  0.40,
-  fireplace:  0.55,
-  wind:       0.45,
-  cat:        0.70,
-  lamp:       0.60,
-  chair:      0.65,
-  mouseClick: 0.50,
-  keyboard:   0.30,
+  mainMusic:   0.40,
+  fireplace:   0.55,
+  wind:        1.00, // set to max; file may be quiet
+  cat:         0.70,
+  lamp:        0.60,
+  chair:       0.65,
+  mouseClick:  0.50,
+  keyboard:    0.30,
+  typingEffect: 0.50,
+}
+// ────────────────────────────────────────────────────────────────────────────
+
+// ─── BASKETBALL CONSTANTS — adjust to tune gameplay ──────────────────────
+const SHOT_METER_SPEED = 0.55    // full swings per second (higher = faster bar)
+const SHOT_GOOD_ZONE   = 0.14   // fraction below 1.0 that counts as a good shot
+const BALL_HOLD_DISTANCE = 2.4  // units in front of camera the ball floats
+const BALL_SPAWN = [40, 0.55, -40] // where the ball rests when not held
+const HOOP_POS = [52, 13, -52]    // position of the hoop group
+const HOOP_ROT_Y = Math.PI * 0.75 // hoop group Y rotation (faces scene center)
+// World-space rim centre (computed from HOOP_POS + local offset rotated by HOOP_ROT_Y)
+const HOOP_RIM_WORLD = new THREE.Vector3(
+  HOOP_POS[0] + 0.9 * Math.sin(-Math.PI * 0.75), // local [0,-1,-0.9] → world
+  HOOP_POS[1] - 1.0,
+  HOOP_POS[2] + 0.9 * Math.cos(-Math.PI * 0.75)
+)
+const FLIGHT_DURATION = 1.3 // seconds for ball arc
+// ────────────────────────────────────────────────────────────────────────────
+
+// ─── TypedText: letter-by-letter typing animation ────────────────────────
+const CHAR_DELAY_MS = 45
+const TypedText = ({ text }) => {
+  const [displayed, setDisplayed] = useState('')
+  const [cursorOn, setCursorOn] = useState(true)
+
+  useEffect(() => {
+    if (!text) { setDisplayed(''); return }
+    setDisplayed('')
+    let i = 0
+    const iv = setInterval(() => {
+      i++
+      setDisplayed(text.slice(0, i))
+      if (i >= text.length) clearInterval(iv)
+    }, CHAR_DELAY_MS)
+    return () => clearInterval(iv)
+  }, [text])
+
+  useEffect(() => {
+    const iv = setInterval(() => setCursorOn(v => !v), 530)
+    return () => clearInterval(iv)
+  }, [])
+
+  return (
+    <span>
+      {displayed}
+      <span style={{ opacity: cursorOn ? 1 : 0, marginLeft: '2px' }}>▌</span>
+    </span>
+  )
 }
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -78,151 +127,141 @@ const DetailedCat = ({ targetPosition, active, isAtFireplace, isHovered, canInte
     if (isAtFireplace && distance < 0.2) {
       groupRef.current.position.y = targetPosition[1] + Math.sin(state.clock.elapsedTime * 1.5) * 0.04
       if (tailRef.current) tailRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 2) * 0.3
-      // Ear twitching when relaxed
-      if (earLeftRef.current) earLeftRef.current.rotation.z = 0.3 + Math.sin(state.clock.elapsedTime * 3) * 0.05
-      if (earRightRef.current) earRightRef.current.rotation.z = -0.3 + Math.sin(state.clock.elapsedTime * 3.5) * 0.05
+      if (earLeftRef.current) earLeftRef.current.rotation.z = -0.2 + Math.sin(state.clock.elapsedTime * 3) * 0.06
+      if (earRightRef.current) earRightRef.current.rotation.z = 0.2 + Math.sin(state.clock.elapsedTime * 3.5) * 0.06
     }
-    // Hover bulge
     const scaleTarget = (isHovered && canInteract) ? 1.08 : 1.0
     catScaleRef.current = THREE.MathUtils.lerp(catScaleRef.current, scaleTarget, 0.1)
     groupRef.current.scale.setScalar(catScaleRef.current)
   })
 
-  const furColor = "#4a3520"
-  const furColorLight = "#6b4c2a"
-  const furColorDark = "#2d1f12"
+  const fur      = '#c87941'   // warm tabby orange
+  const furDark  = '#7a4820'   // darker markings
+  const furLight = '#e8b87a'   // lighter belly / muzzle
+  const eyeCol   = '#55dd55'   // bright green eyes
+  const noseCol  = '#ffaaaa'
 
   return (
     <group ref={groupRef} userData={{ interactive: true, type: 'cat' }}>
-      {/* Body - elongated ellipsoid */}
-      <mesh castShadow position={[0, 0, 0]}>
-        <sphereGeometry args={[0.5, 16, 12]} />
-        <meshStandardMaterial color={furColor} roughness={0.9} />
+
+      {/* ── BODY ── */}
+      <mesh castShadow position={[0, 0, 0]} scale={[1, 0.82, 1.18]}>
+        <sphereGeometry args={[0.46, 16, 12]} />
+        <meshStandardMaterial color={fur} roughness={0.88} />
       </mesh>
-      <mesh castShadow position={[0, 0, -0.2]} scale={[0.9, 0.85, 1.3]}>
-        <sphereGeometry args={[0.5, 16, 12]} />
-        <meshStandardMaterial color={furColor} roughness={0.9} />
+      {/* belly patch */}
+      <mesh position={[0, -0.08, 0.22]} scale={[0.62, 0.55, 0.42]}>
+        <sphereGeometry args={[0.46, 12, 8]} />
+        <meshStandardMaterial color={furLight} roughness={0.88} />
       </mesh>
-      
-      {/* Head */}
-      <group position={[0, 0.25, 0.55]}>
-        {/* Main head sphere */}
-        <mesh castShadow>
-          <sphereGeometry args={[0.35, 16, 12]} />
-          <meshStandardMaterial color={furColor} roughness={0.9} />
+
+      {/* ── HEAD — large & round, hallmark of a cute cat ── */}
+      <group position={[0, 0.54, 0.28]}>
+        <mesh castShadow scale={[1.0, 0.97, 0.95]}>
+          <sphereGeometry args={[0.42, 18, 14]} />
+          <meshStandardMaterial color={fur} roughness={0.88} />
         </mesh>
-        
-        {/* Cheeks */}
-        <mesh castShadow position={[-0.15, -0.08, 0.15]} scale={[0.7, 0.6, 0.5]}>
-          <sphereGeometry args={[0.2, 12, 8]} />
-          <meshStandardMaterial color={furColorLight} roughness={0.9} />
+
+        {/* white muzzle */}
+        <mesh position={[0, -0.1, 0.34]} scale={[0.62, 0.52, 0.4]}>
+          <sphereGeometry args={[0.32, 12, 8]} />
+          <meshStandardMaterial color={furLight} roughness={0.88} />
         </mesh>
-        <mesh castShadow position={[0.15, -0.08, 0.15]} scale={[0.7, 0.6, 0.5]}>
-          <sphereGeometry args={[0.2, 12, 8]} />
-          <meshStandardMaterial color={furColorLight} roughness={0.9} />
+
+        {/* nose */}
+        <mesh position={[0, -0.09, 0.44]}>
+          <sphereGeometry args={[0.038, 7, 5]} />
+          <meshStandardMaterial color={noseCol} roughness={0.3} />
         </mesh>
-        
-        {/* Muzzle */}
-        <mesh castShadow position={[0, -0.1, 0.25]} scale={[0.6, 0.5, 0.5]}>
-          <sphereGeometry args={[0.15, 12, 8]} />
-          <meshStandardMaterial color={furColorLight} roughness={0.9} />
-        </mesh>
-        
-        {/* Nose */}
-        <mesh position={[0, -0.05, 0.35]}>
-          <sphereGeometry args={[0.04, 8, 6]} />
-          <meshStandardMaterial color="#ffaaaa" roughness={0.5} />
-        </mesh>
-        
-        {/* Eyes */}
-        <group position={[-0.12, 0.05, 0.28]}>
-          <mesh>
-            <sphereGeometry args={[0.07, 12, 8]} />
-            <meshStandardMaterial color="#111" />
-          </mesh>
-          <mesh position={[0.02, 0.02, 0.05]}>
-            <sphereGeometry args={[0.025, 8, 6]} />
-            <meshStandardMaterial color="#ffdd44" emissive="#443300" emissiveIntensity={0.3} />
-          </mesh>
-        </group>
-        <group position={[0.12, 0.05, 0.28]}>
-          <mesh>
-            <sphereGeometry args={[0.07, 12, 8]} />
-            <meshStandardMaterial color="#111" />
-          </mesh>
-          <mesh position={[-0.02, 0.02, 0.05]}>
-            <sphereGeometry args={[0.025, 8, 6]} />
-            <meshStandardMaterial color="#ffdd44" emissive="#443300" emissiveIntensity={0.3} />
-          </mesh>
-        </group>
-        
-        {/* Ears */}
-        <group ref={earLeftRef} position={[-0.2, 0.3, 0]} rotation={[0.2, 0, 0.3]}>
+
+        {/* ── EYES ── large with iris + pupil + shine */}
+        {[[-0.17, 1], [0.17, -1]].map(([x, side]) => (
+          <group key={x} position={[x, 0.07, 0.37]}>
+            {/* whites / sclera outline */}
+            <mesh scale={[1, 0.78, 0.55]}>
+              <sphereGeometry args={[0.095, 12, 8]} />
+              <meshStandardMaterial color="#0a0a0a" />
+            </mesh>
+            {/* iris */}
+            <mesh position={[0, 0, 0.04]} scale={[1, 0.78, 0.55]}>
+              <sphereGeometry args={[0.065, 10, 7]} />
+              <meshStandardMaterial color={eyeCol} emissive={eyeCol} emissiveIntensity={0.55} />
+            </mesh>
+            {/* pupil */}
+            <mesh position={[0, 0, 0.08]} scale={[0.45, 1, 0.55]}>
+              <sphereGeometry args={[0.055, 8, 6]} />
+              <meshStandardMaterial color="#000" />
+            </mesh>
+            {/* shine */}
+            <mesh position={[side * 0.022, 0.025, 0.11]}>
+              <sphereGeometry args={[0.012, 5, 4]} />
+              <meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={2} />
+            </mesh>
+          </group>
+        ))}
+
+        {/* ── EARS — tall triangles, wide base ── */}
+        <group ref={earLeftRef} position={[-0.24, 0.34, -0.02]} rotation={[0.05, 0, -0.22]}>
           <mesh castShadow>
-            <coneGeometry args={[0.12, 0.25, 4]} />
-            <meshStandardMaterial color={furColorDark} roughness={0.9} />
+            <coneGeometry args={[0.13, 0.30, 3]} />
+            <meshStandardMaterial color={furDark} roughness={0.88} />
           </mesh>
-          <mesh position={[0, -0.02, 0.02]} scale={[0.6, 0.8, 0.6]}>
-            <coneGeometry args={[0.1, 0.2, 4]} />
-            <meshStandardMaterial color="#ffcccc" roughness={0.8} />
+          <mesh scale={[0.55, 0.72, 1]} position={[0, 0, 0.015]}>
+            <coneGeometry args={[0.10, 0.24, 3]} />
+            <meshStandardMaterial color="#ff9999" roughness={0.8} />
           </mesh>
         </group>
-        <group ref={earRightRef} position={[0.2, 0.3, 0]} rotation={[0.2, 0, -0.3]}>
+        <group ref={earRightRef} position={[0.24, 0.34, -0.02]} rotation={[0.05, 0, 0.22]}>
           <mesh castShadow>
-            <coneGeometry args={[0.12, 0.25, 4]} />
-            <meshStandardMaterial color={furColorDark} roughness={0.9} />
+            <coneGeometry args={[0.13, 0.30, 3]} />
+            <meshStandardMaterial color={furDark} roughness={0.88} />
           </mesh>
-          <mesh position={[0, -0.02, 0.02]} scale={[0.6, 0.8, 0.6]}>
-            <coneGeometry args={[0.1, 0.2, 4]} />
-            <meshStandardMaterial color="#ffcccc" roughness={0.8} />
+          <mesh scale={[0.55, 0.72, 1]} position={[0, 0, 0.015]}>
+            <coneGeometry args={[0.10, 0.24, 3]} />
+            <meshStandardMaterial color="#ff9999" roughness={0.8} />
           </mesh>
         </group>
-        
-        {/* Whiskers (thin cylinders) */}
-        {[-1, 0, 1].map((i) => (
-          <mesh key={`wl${i}`} position={[-0.2, -0.08 + i * 0.03, 0.28]} rotation={[0, 0, 0.2 + i * 0.1]}>
-            <cylinderGeometry args={[0.003, 0.003, 0.25, 4]} />
-            <meshStandardMaterial color="#ddd" />
+
+        {/* whiskers */}
+        {[-1, 0, 1].map(i => (
+          <mesh key={`wl${i}`} position={[-0.22, -0.08 + i * 0.04, 0.38]} rotation={[0, 0.1, 0.18 + i * 0.09]}>
+            <cylinderGeometry args={[0.0025, 0.002, 0.30, 4]} />
+            <meshStandardMaterial color="#eee" />
           </mesh>
         ))}
-        {[-1, 0, 1].map((i) => (
-          <mesh key={`wr${i}`} position={[0.2, -0.08 + i * 0.03, 0.28]} rotation={[0, 0, -0.2 - i * 0.1]}>
-            <cylinderGeometry args={[0.003, 0.003, 0.25, 4]} />
-            <meshStandardMaterial color="#ddd" />
+        {[-1, 0, 1].map(i => (
+          <mesh key={`wr${i}`} position={[0.22, -0.08 + i * 0.04, 0.38]} rotation={[0, -0.1, -0.18 - i * 0.09]}>
+            <cylinderGeometry args={[0.0025, 0.002, 0.30, 4]} />
+            <meshStandardMaterial color="#eee" />
           </mesh>
         ))}
       </group>
-      
-      {/* Front legs */}
-      <mesh castShadow position={[-0.2, -0.35, 0.2]} scale={[0.4, 1, 0.4]}>
-        <sphereGeometry args={[0.15, 8, 8]} />
-        <meshStandardMaterial color={furColor} roughness={0.9} />
+
+      {/* ── FRONT PAWS ── */}
+      <mesh castShadow position={[-0.19, -0.38, 0.32]} scale={[0.46, 0.28, 0.54]}>
+        <sphereGeometry args={[0.22, 8, 6]} />
+        <meshStandardMaterial color={furLight} roughness={0.88} />
       </mesh>
-      <mesh castShadow position={[0.2, -0.35, 0.2]} scale={[0.4, 1, 0.4]}>
-        <sphereGeometry args={[0.15, 8, 8]} />
-        <meshStandardMaterial color={furColor} roughness={0.9} />
+      <mesh castShadow position={[0.19, -0.38, 0.32]} scale={[0.46, 0.28, 0.54]}>
+        <sphereGeometry args={[0.22, 8, 6]} />
+        <meshStandardMaterial color={furLight} roughness={0.88} />
       </mesh>
-      
-      {/* Back legs (tucked under) */}
-      <mesh castShadow position={[-0.25, -0.25, -0.35]} scale={[0.5, 0.7, 0.6]}>
-        <sphereGeometry args={[0.2, 8, 8]} />
-        <meshStandardMaterial color={furColor} roughness={0.9} />
+
+      {/* ── BACK PAWS ── */}
+      <mesh castShadow position={[-0.24, -0.35, -0.28]} scale={[0.5, 0.32, 0.65]}>
+        <sphereGeometry args={[0.22, 8, 6]} />
+        <meshStandardMaterial color={fur} roughness={0.88} />
       </mesh>
-      <mesh castShadow position={[0.25, -0.25, -0.35]} scale={[0.5, 0.7, 0.6]}>
-        <sphereGeometry args={[0.2, 8, 8]} />
-        <meshStandardMaterial color={furColor} roughness={0.9} />
+      <mesh castShadow position={[0.24, -0.35, -0.28]} scale={[0.5, 0.32, 0.65]}>
+        <sphereGeometry args={[0.22, 8, 6]} />
+        <meshStandardMaterial color={fur} roughness={0.88} />
       </mesh>
-      
-      {/* Tail */}
-      <group ref={tailRef} position={[0, 0.1, -0.7]} rotation={[-0.3, 0, 0]}>
-        <mesh castShadow>
-          <cylinderGeometry args={[0.06, 0.04, 0.6, 8]} />
-          <meshStandardMaterial color={furColorDark} roughness={0.9} />
-        </mesh>
-        <mesh castShadow position={[0, 0.35, 0.1]} rotation={[0.5, 0, 0]}>
-          <sphereGeometry args={[0.05, 8, 6]} />
-          <meshStandardMaterial color={furColorDark} roughness={0.9} />
-        </mesh>
+
+      {/* ── TAIL — three curved segments ── */}
+      <group ref={tailRef} position={[0.05, 0.08, -0.62]} rotation={[-0.45, 0.15, 0]}>
+        <mesh castShadow><cylinderGeometry args={[0.062, 0.082, 0.55, 8]} /><meshStandardMaterial color={furDark} roughness={0.88} /></mesh>
+        <mesh castShadow position={[0.12, 0.32, 0]} rotation={[0, 0, 0.55]}><cylinderGeometry args={[0.05, 0.062, 0.46, 8]} /><meshStandardMaterial color={furDark} roughness={0.88} /></mesh>
+        <mesh castShadow position={[0.26, 0.54, 0]}><sphereGeometry args={[0.078, 8, 6]} /><meshStandardMaterial color={fur} roughness={0.88} /></mesh>
       </group>
     </group>
   )
@@ -652,6 +691,143 @@ const Fireplace = ({ position, active }) => {
     </group>
   )
 }
+
+// ─── ROCKET-POWERED BASKETBALL HOOP ──────────────────────────────────────
+const HoopWithThrusters = () => {
+  const flameRefs = [useRef(), useRef(), useRef(), useRef()]
+  useFrame((state) => {
+    const t = state.clock.elapsedTime
+    flameRefs.forEach((r, i) => {
+      if (!r.current) return
+      r.current.scale.y = 0.75 + Math.sin(t * 9 + i * 1.7) * 0.28
+      r.current.position.y = -0.52 + Math.sin(t * 9 + i * 1.7) * 0.04
+    })
+  })
+  // Thruster positions in local XZ (below backboard, 2x2 grid)
+  const thrusterXZ = [[-0.7, -0.45], [0.7, -0.45], [-0.7, 0.45], [0.7, 0.45]]
+  return (
+    <group position={HOOP_POS} rotation={[0, HOOP_ROT_Y, 0]}>
+
+      {/* ── BACKBOARD ── */}
+      {/* Main board — dark tinted glass */}
+      <mesh position={[0, 0, 0]} castShadow>
+        <boxGeometry args={[3.8, 2.6, 0.12]} />
+        <meshStandardMaterial color="#0a1025" transparent opacity={0.82} emissive="#1a2060" emissiveIntensity={0.25} />
+      </mesh>
+      {/* Glowing border frame */}
+      {[
+        [0,  1.36, 0.07, 3.84, 0.08, 0.1],
+        [0, -1.36, 0.07, 3.84, 0.08, 0.1],
+        [-1.96, 0, 0.07, 0.08, 2.72, 0.1],
+        [ 1.96, 0, 0.07, 0.08, 2.72, 0.1],
+      ].map(([x, y, z, w, h, d], i) => (
+        <mesh key={i} position={[x, y, z]}>
+          <boxGeometry args={[w, h, d]} />
+          <meshStandardMaterial color="#60aaff" emissive="#60aaff" emissiveIntensity={2.5} />
+        </mesh>
+      ))}
+      {/* Target square */}
+      {[
+        [0,  -0.27, 0.08, 1.1, 0.055, 0.05],
+        [0,  -0.87, 0.08, 1.1, 0.055, 0.05],
+        [-0.575, -0.57, 0.08, 0.055, 0.66, 0.05],
+        [ 0.575, -0.57, 0.08, 0.055, 0.66, 0.05],
+      ].map(([x, y, z, w, h, d], i) => (
+        <mesh key={i} position={[x, y, z]}>
+          <boxGeometry args={[w, h, d]} />
+          <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={1.2} transparent opacity={0.8} />
+        </mesh>
+      ))}
+
+      {/* ── RIM ── */}
+      <group position={[0, -0.98, -0.9]} rotation={[Math.PI / 2, 0, 0]}>
+        <mesh>
+          <torusGeometry args={[0.76, 0.045, 10, 36]} />
+          <meshStandardMaterial color="#cc3300" emissive="#882200" emissiveIntensity={0.6} metalness={0.7} roughness={0.3} />
+        </mesh>
+      </group>
+
+      {/* ── NET — rings + strings ── */}
+      <group position={[0, -0.98, -0.9]}>
+        {[0.22, 0.48, 0.70, 0.88].map((depth, i) => (
+          <mesh key={i} position={[0, -depth * 0.62, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.76 - depth * 0.16, 0.012, 5, 24]} />
+            <meshStandardMaterial color="#cccccc" transparent opacity={0.65} />
+          </mesh>
+        ))}
+        {Array.from({ length: 14 }).map((_, i) => {
+          const a = (i / 14) * Math.PI * 2
+          return (
+            <mesh key={i} position={[Math.cos(a) * 0.68, -0.28, Math.sin(a) * 0.68]}>
+              <cylinderGeometry args={[0.009, 0.007, 0.6, 3]} />
+              <meshStandardMaterial color="#cccccc" transparent opacity={0.65} />
+            </mesh>
+          )
+        })}
+      </group>
+
+      {/* ── THRUSTER MOUNT PLATE ── */}
+      <mesh position={[0, -1.72, 0]} castShadow>
+        <boxGeometry args={[2.0, 0.22, 1.1]} />
+        <meshStandardMaterial color="#4a4a6a" metalness={0.85} roughness={0.25} />
+      </mesh>
+
+      {/* ── 4 THRUSTERS ── */}
+      {thrusterXZ.map(([tx, tz], i) => (
+        <group key={i} position={[tx, -1.72, tz]}>
+          {/* housing */}
+          <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.22, 0.26, 0.55, 10]} />
+            <meshStandardMaterial color="#383858" metalness={0.85} roughness={0.25} />
+          </mesh>
+          {/* nozzle flare */}
+          <mesh position={[0, -0.36, 0]}>
+            <cylinderGeometry args={[0.19, 0.25, 0.22, 10]} />
+            <meshStandardMaterial color="#22223a" metalness={0.9} roughness={0.2} />
+          </mesh>
+          {/* flame cone */}
+          <mesh ref={flameRefs[i]} position={[0, -0.52, 0]}>
+            <coneGeometry args={[0.17, 0.55, 10]} />
+            <meshStandardMaterial color="#ff7700" emissive="#ff5500" emissiveIntensity={4} transparent opacity={0.88} />
+          </mesh>
+          {/* Glow light from first thruster pair */}
+          {i < 2 && <pointLight color="#ff6600" intensity={1.8} distance={5} decay={2} position={[0, -0.7, 0]} />}
+        </group>
+      ))}
+    </group>
+  )
+}
+
+// ─── BASKETBALL ───────────────────────────────────────────────────────────
+const BasketballMesh = ({ meshRef }) => (
+  <group ref={meshRef} position={BALL_SPAWN} userData={{ interactive: true, type: 'basketball' }}>
+    <mesh castShadow>
+      <sphereGeometry args={[0.40, 18, 14]} />
+      <meshStandardMaterial color="#e05a12" roughness={0.72} />
+    </mesh>
+    {/* longitude seams */}
+    {[0, Math.PI / 2].map((r, i) => (
+      <mesh key={i} rotation={[0, r, 0]}>
+        <torusGeometry args={[0.405, 0.013, 5, 40]} />
+        <meshStandardMaterial color="#110500" roughness={0.8} />
+      </mesh>
+    ))}
+    {/* equator seam */}
+    <mesh rotation={[Math.PI / 2, 0, 0]}>
+      <torusGeometry args={[0.405, 0.013, 5, 40]} />
+      <meshStandardMaterial color="#110500" roughness={0.8} />
+    </mesh>
+    {/* hemisphere seams */}
+    {[-1, 1].map((s, i) => (
+      <mesh key={i} position={[0, s * 0.28, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.338, 0.011, 5, 36]} />
+        <meshStandardMaterial color="#110500" roughness={0.8} />
+      </mesh>
+    ))}
+  </group>
+)
+// ────────────────────────────────────────────────────────────────────────────
+
 const Computer = ({ pcOn, isSitting }) => {
   const screenMat = useRef()
   const [hoveredButton, setHoveredButton] = useState(null)
@@ -688,21 +864,27 @@ const Computer = ({ pcOn, isSitting }) => {
     const CURSOR_SIZE = 24
 
     const handleMouseMove = (e) => {
-      if (!cursorRef.current) return
+      if (!cursorRef.current || !containerRef.current) return
 
-      // Update cursor position
-      cursorPosRef.current.x += (e.movementX || 0)
-      cursorPosRef.current.y += (e.movementY || 0)
+      const rect = containerRef.current.getBoundingClientRect()
+      const relX = e.clientX - rect.left
+      const relY = e.clientY - rect.top
 
-      // Clamp to container bounds
-      cursorPosRef.current.x = Math.max(0, Math.min(CONTAINER_WIDTH - CURSOR_SIZE, cursorPosRef.current.x))
-      cursorPosRef.current.y = Math.max(0, Math.min(CONTAINER_HEIGHT - CURSOR_SIZE, cursorPosRef.current.y))
+      // Only sync cursor when the real mouse is within the monitor area
+      if (relX >= 0 && relY >= 0 && relX <= rect.width && relY <= rect.height) {
+        // Map screen-space position → virtual container space (always in sync)
+        cursorPosRef.current.x = Math.max(0, Math.min(CONTAINER_WIDTH - CURSOR_SIZE,
+          (relX / rect.width) * CONTAINER_WIDTH))
+        cursorPosRef.current.y = Math.max(0, Math.min(CONTAINER_HEIGHT - CURSOR_SIZE,
+          (relY / rect.height) * CONTAINER_HEIGHT))
 
-      cursorRef.current.style.transform = `translate(${cursorPosRef.current.x}px, ${cursorPosRef.current.y}px)`
+        cursorRef.current.style.transform = `translate(${cursorPosRef.current.x}px, ${cursorPosRef.current.y}px)`
 
-      // Check hover state
-      const hovered = getButtonAtCursor(cursorPosRef.current.x + CURSOR_SIZE / 2, cursorPosRef.current.y + CURSOR_SIZE / 2)
-      setHoveredButton(hovered?.id || null)
+        // Check hover state
+        const hovered = getButtonAtCursor(cursorPosRef.current.x + CURSOR_SIZE / 2, cursorPosRef.current.y + CURSOR_SIZE / 2)
+        setHoveredButton(hovered?.id || null)
+      }
+      // Outside monitor: leave cursor at last valid position (no drift)
     }
 
     const handleClick = () => {
@@ -1056,6 +1238,7 @@ export const Scene = () => {
   const mainMusic = useRef(null)
   const windSound = useRef(null)
   const windIntervalRef = useRef(null)
+  const typingEffectSound = useRef(null)
   const musicStartedRef = useRef(false)
   const prevCatPosition = useRef(catPosition)
   const prevView = useRef(view)
@@ -1071,11 +1254,25 @@ export const Scene = () => {
   const proximityPromptRef = useRef(null)
 
   // Track first-interaction per object (for proximity prompts)
-  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false })
+  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false, basketball: false })
 
   // Precomputed world positions for proximity checks
   const lampWorldPos = useMemo(() => new THREE.Vector3(-40, 1.5, 50), [])
   const chairWorldPos = useMemo(() => new THREE.Vector3(0, 0, 4.2), [])
+
+  // Basketball refs
+  const basketballRef = useRef()
+  const holdingBallRef = useRef(false)
+  const chargingRef = useRef(false)
+  const chargeLevelRef = useRef(0)
+  const chargingUpRef = useRef(true)
+  const ballInFlightRef = useRef(false)
+  const flightTRef = useRef(0)
+  const shotGoodRef = useRef(false)
+  const ballStartRef = useRef(new THREE.Vector3())
+  const cameraYOffsetRef = useRef(0)
+  const chargeBarFillRef = useRef(null)
+  const [holdingBall, setHoldingBall] = useState(false)
   
   const sitPos = useMemo(() => new THREE.Vector3(0, 3.8, 3.5), []) 
   const deskLookAt = useMemo(() => new THREE.Vector3(0, 3.5, 11.5), [])
@@ -1123,6 +1320,26 @@ export const Scene = () => {
     mainMusic.current = new Audio('/sounds/mainMusic.mp3')
     mainMusic.current.loop = true
     mainMusic.current.volume = 0
+
+    typingEffectSound.current = new Audio('/sounds/typingEffect.mp3')
+    typingEffectSound.current.loop = true
+    typingEffectSound.current.volume = VOLUMES.typingEffect
+
+    // Attempt wind boost via Web Audio API GainNode (goes beyond HTMLAudio vol cap)
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      const gain = ctx.createGain()
+      gain.gain.value = 3.0
+      gain.connect(ctx.destination)
+      const src = ctx.createMediaElementSource(windSound.current)
+      src.connect(gain)
+      // Resume context on first gesture (browser requirement)
+      const resumeCtx = () => { ctx.resume(); window.removeEventListener('click', resumeCtx); window.removeEventListener('keydown', resumeCtx) }
+      window.addEventListener('click', resumeCtx)
+      window.addEventListener('keydown', resumeCtx)
+    } catch (_) {
+      // Web Audio API not supported — fall back to element volume (already set to 1.0)
+    }
   }, [])
 
   // Fireplace sound: loop while fireplace is active (lamp off)
@@ -1152,6 +1369,32 @@ export const Scene = () => {
     scheduleWind()
     return () => clearTimeout(windIntervalRef.current)
   }, [])
+
+  // Typing effect sound: plays in sync with TypedText animation when prompt appears
+  useEffect(() => {
+    if (!typingEffectSound.current) return
+    if (!proximityPrompt) {
+      typingEffectSound.current.pause()
+      typingEffectSound.current.currentTime = 0
+      return
+    }
+    typingEffectSound.current.currentTime = 0
+    typingEffectSound.current.play().catch(() => {})
+    const duration = proximityPrompt.length * CHAR_DELAY_MS
+    const timer = setTimeout(() => {
+      if (typingEffectSound.current) {
+        typingEffectSound.current.pause()
+        typingEffectSound.current.currentTime = 0
+      }
+    }, duration)
+    return () => {
+      clearTimeout(timer)
+      if (typingEffectSound.current) {
+        typingEffectSound.current.pause()
+        typingEffectSound.current.currentTime = 0
+      }
+    }
+  }, [proximityPrompt])
 
   useEffect(() => {
     camera.position.set(-55, 4, 55)
@@ -1188,9 +1431,15 @@ const handleKeyDown = (e) => {
       camera.position.y = 4
     }
   }
-  if (e.code === 'Space' && isSitting) {
+  if (e.code === 'Space') {
     e.preventDefault()
-    togglePc()
+    if (isSitting) {
+      togglePc()
+    } else if (holdingBallRef.current && !ballInFlightRef.current && !chargingRef.current) {
+      // Start charging shot
+      chargingRef.current = true
+      chargingUpRef.current = true
+    }
   }
 }
 
@@ -1198,6 +1447,22 @@ const handleKeyDown = (e) => {
     const keys = { KeyW: 'forward', KeyS: 'backward', KeyA: 'left', KeyD: 'right' }
     if (keys[e.code]) {
       setMovement((m) => ({ ...m, [keys[e.code]]: false }))
+    }
+    if (e.code === 'Space' && chargingRef.current) {
+      chargingRef.current = false
+      if (!ballInFlightRef.current && basketballRef.current) {
+        // Good shot if chargeLevel is within SHOT_GOOD_ZONE below 1.0
+        shotGoodRef.current = chargeLevelRef.current >= (1.0 - SHOT_GOOD_ZONE)
+        // Record ball world position as flight start
+        basketballRef.current.getWorldPosition(ballStartRef.current)
+        // Launch flight
+        ballInFlightRef.current = true
+        flightTRef.current = 0
+        holdingBallRef.current = false
+        setHoldingBall(false)
+        // Jump offset: camera pops up, then lerps back to 0
+        cameraYOffsetRef.current = 0.6
+      }
     }
   }
 
@@ -1213,6 +1478,22 @@ const handleKeyDown = (e) => {
 
     // Don't handle scene clicks when PC is on - let the UI overlay handle them
     if (isSitting && pcOn) return
+
+    // Pick up basketball
+    if (lookingAtRef.current === 'basketball' && !holdingBallRef.current && !ballInFlightRef.current) {
+      holdingBallRef.current = true
+      setHoldingBall(true)
+      hasInteractedRef.current.basketball = true
+      return
+    }
+
+    // If holding ball and interacting with something else, drop it first
+    if (holdingBallRef.current && lookingAtRef.current !== 'basketball') {
+      holdingBallRef.current = false
+      setHoldingBall(false)
+      chargingRef.current = false
+      chargeLevelRef.current = 0
+    }
 
     if (lookingAtRef.current === 'lamp') {
       toggleLamp()
@@ -1286,7 +1567,7 @@ useEffect(() => {
   return () => window.removeEventListener('mousemove', handleMouseMove)
 }, [camera, isSitting])
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (isSitting) {
       if (zoomedIn) {
         const zoomedPos = new THREE.Vector3(0, 3.5, -1.3)
@@ -1294,11 +1575,11 @@ useEffect(() => {
       } else {
         state.camera.position.lerp(sitPos, 0.03)
       }
-      
+
       const dummy = new THREE.Object3D()
       dummy.position.copy(state.camera.position)
       dummy.lookAt(deskLookAt)
-      
+
       state.camera.quaternion.slerp(dummy.quaternion, 0.03)
       state.camera.updateMatrixWorld()
     } else {
@@ -1309,7 +1590,73 @@ useEffect(() => {
       direction.subVectors(frontVector, sideVector).normalize().multiplyScalar(velocity).applyEuler(state.camera.rotation)
       state.camera.position.x = Math.max(-55, Math.min(55, state.camera.position.x + direction.x))
       state.camera.position.z = Math.max(-55, Math.min(55, state.camera.position.z + direction.z))
-      state.camera.position.y = 4
+
+      // ── BASKETBALL PHYSICS ──────────────────────────────────────────────
+      // Ball held: float in front of camera
+      if (holdingBallRef.current && basketballRef.current && !ballInFlightRef.current) {
+        const forward = new THREE.Vector3(0, -0.25, -BALL_HOLD_DISTANCE)
+        forward.applyQuaternion(state.camera.quaternion)
+        basketballRef.current.position.copy(state.camera.position).add(forward)
+        // Clamp to scene bounds even while held
+        basketballRef.current.position.x = Math.max(-55, Math.min(55, basketballRef.current.position.x))
+        basketballRef.current.position.z = Math.max(-55, Math.min(55, basketballRef.current.position.z))
+      }
+
+      // Charging: oscillate charge bar + crouch camera
+      if (chargingRef.current && !ballInFlightRef.current) {
+        cameraYOffsetRef.current = THREE.MathUtils.lerp(cameraYOffsetRef.current, -0.5, 0.1)
+        if (chargingUpRef.current) {
+          chargeLevelRef.current = Math.min(1.0, chargeLevelRef.current + SHOT_METER_SPEED * delta)
+          if (chargeLevelRef.current >= 1.0) chargingUpRef.current = false
+        } else {
+          chargeLevelRef.current = Math.max(0.0, chargeLevelRef.current - SHOT_METER_SPEED * delta)
+          if (chargeLevelRef.current <= 0.0) chargingUpRef.current = true
+        }
+        if (chargeBarFillRef.current) {
+          chargeBarFillRef.current.style.height = `${chargeLevelRef.current * 100}%`
+        }
+      } else {
+        // Lerp camera Y offset back to 0 (return from crouch or settle after jump)
+        cameraYOffsetRef.current = THREE.MathUtils.lerp(cameraYOffsetRef.current, 0, 0.08)
+      }
+
+      // Ball in flight: quadratic Bezier arc
+      if (ballInFlightRef.current && basketballRef.current) {
+        flightTRef.current += delta / FLIGHT_DURATION
+        const t = Math.min(flightTRef.current, 1.0)
+        const start = ballStartRef.current
+        const target = shotGoodRef.current
+          ? HOOP_RIM_WORLD.clone()
+          : HOOP_RIM_WORLD.clone().add(new THREE.Vector3(0.9, 0.4, 0.9))
+        const peak = new THREE.Vector3(
+          (start.x + target.x) * 0.5,
+          Math.max(start.y, target.y) + 7.0,
+          (start.z + target.z) * 0.5
+        )
+        const q = 1 - t
+        basketballRef.current.position.set(
+          q * q * start.x + 2 * q * t * peak.x + t * t * target.x,
+          q * q * start.y + 2 * q * t * peak.y + t * t * target.y,
+          q * q * start.z + 2 * q * t * peak.z + t * t * target.z
+        )
+        basketballRef.current.rotation.x += 0.06
+
+        if (t >= 1.0) {
+          ballInFlightRef.current = false
+          flightTRef.current = 0
+          chargeLevelRef.current = 0
+          if (chargeBarFillRef.current) chargeBarFillRef.current.style.height = '0%'
+          // Rest ball near hoop at ground-ish level
+          basketballRef.current.position.set(
+            target.x + (shotGoodRef.current ? 0 : 1.5),
+            0.55,
+            target.z + (shotGoodRef.current ? 0 : 1.5)
+          )
+        }
+      }
+
+      // Camera Y with crouch/jump offset
+      state.camera.position.y = 4 + cameraYOffsetRef.current
     }
 
     raycaster.setFromCamera({ x: 0, y: 0 }, camera)
@@ -1375,8 +1722,8 @@ useEffect(() => {
       <Html calculatePosition={() => [0, 0, 0]} style={{ pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100vw', height: '100vh' }}>
         <style>{`
           @keyframes promptPulse {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 1; }
+            0%, 100% { opacity: 0.6; transform: translateX(-50%) scale(1); }
+            50% { opacity: 1; transform: translateX(-50%) scale(1.07); }
           }
         `}</style>
         {!(isSitting && pcOn) && (
@@ -1393,14 +1740,56 @@ useEffect(() => {
             transform: 'translateX(-50%)',
             color: '#a855f7',
             fontFamily: "'Courier New', monospace",
-            fontSize: '15px',
-            letterSpacing: '2px',
-            textShadow: '0 0 10px #a855f7, 0 0 20px #a855f7',
+            fontSize: '20px',
+            letterSpacing: '3px',
+            textShadow: '0 0 14px #a855f7, 0 0 32px #a855f7',
             animation: 'promptPulse 1.5s ease-in-out infinite',
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
           }}>
-            ▶ CLICK to interact with {proximityPrompt}
+            ▶ <TypedText text={`CLICK to interact with ${proximityPrompt}`} />
+          </div>
+        )}
+        {/* Basketball charge bar — right side, updated via ref from useFrame */}
+        {holdingBall && !isSitting && (
+          <div style={{
+            position: 'absolute',
+            right: '48px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '30px',
+            height: '220px',
+            background: 'rgba(0,0,0,0.65)',
+            border: '2px solid rgba(168,85,247,0.7)',
+            boxShadow: '0 0 14px rgba(168,85,247,0.4)',
+            borderRadius: '4px',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column-reverse',
+            pointerEvents: 'none',
+          }}>
+            {/* Green fill — grows from bottom, height driven by chargeBarFillRef in useFrame */}
+            <div
+              ref={chargeBarFillRef}
+              style={{
+                width: '100%',
+                height: '0%',
+                background: 'linear-gradient(to top, #22dd44, #aaff88)',
+                boxShadow: '0 0 12px #44ff66',
+                flexShrink: 0,
+              }}
+            />
+            {/* Good-zone indicator band at top (SHOT_GOOD_ZONE fraction) */}
+            <div style={{
+              position: 'absolute',
+              bottom: `${(1 - SHOT_GOOD_ZONE) * 100}%`,
+              left: 0,
+              right: 0,
+              height: `${SHOT_GOOD_ZONE * 100}%`,
+              background: 'rgba(255,255,80,0.12)',
+              borderBottom: '2px solid #ffff44',
+              pointerEvents: 'none',
+            }} />
           </div>
         )}
       </Html>
@@ -1457,6 +1846,9 @@ useEffect(() => {
         isHovered={isHovered.cat}
         canInteract={canInteract.cat}
       />
+
+      <HoopWithThrusters />
+      <BasketballMesh meshRef={basketballRef} />
 
       <EffectComposer>
         <Bloom intensity={1.5} luminanceThreshold={0.8} />
