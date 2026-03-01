@@ -85,7 +85,7 @@ const InstructionsOverlay = ({ visible }) => {
   }, [visible])
   
   if (!visible || !show) return null
-  
+
   return (
     <div style={{
       position: 'fixed',
@@ -93,6 +93,13 @@ const InstructionsOverlay = ({ visible }) => {
       top: '50%',
       transform: 'translateY(-50%)',
       zIndex: 100,
+      padding: '16px 20px',
+      background: 'rgba(5, 5, 5, 0.80)',
+      border: '1px solid rgba(168, 85, 247, 0.55)',
+      boxShadow: '0 0 18px rgba(168, 85, 247, 0.25), inset 0 0 16px rgba(168, 85, 247, 0.06)',
+      backdropFilter: 'blur(4px)',
+    }}>
+    <div style={{
       fontFamily: "'Courier New', monospace",
       color: '#a855f7',
       textShadow: '0 0 10px #a855f7, 0 0 20px #a855f7',
@@ -164,6 +171,7 @@ const InstructionsOverlay = ({ visible }) => {
         <div className="key-box">ESC</div>
         <span>STAND UP</span>
       </div>
+    </div>
     </div>
   )
 }

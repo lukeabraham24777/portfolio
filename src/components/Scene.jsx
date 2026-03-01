@@ -5,31 +5,61 @@ import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
 import { useStore } from '../store'
 import * as THREE from 'three'
 
-// 1. CHAIR COMPONENT
-const Chair = ({ position, isInteractive }) => (
-  <group position={position} rotation={[0, Math.PI, 0]} userData={{ interactive: isInteractive, type: 'chair' }}>
-    <mesh position={[0, 0.8, 0]} castShadow receiveShadow>
-      <boxGeometry args={[2.5, 0.4, 2.5]} />
-      <meshStandardMaterial color="#3d260b" />
-    </mesh>
-    <mesh position={[0, 2.2, -1.1]} castShadow>
-      <boxGeometry args={[2.5, 2.5, 0.3]} />
-      <meshStandardMaterial color="#3d260b" />
-    </mesh>
-    {[[-1, 0.4, 1], [1, 0.4, 1], [-1, 0.4, -1], [1, 0.4, -1]].map((p, i) => (
-      <mesh key={i} position={p}>
-        <boxGeometry args={[0.3, 0.8, 0.3]} />
-        <meshStandardMaterial color="#1a1105" />
-      </mesh>
-    ))}
-  </group>
-)
+// ─── VOLUME CONSTANTS — adjust these to change relative audio levels ───────
+const VOLUMES = {
+  mainMusic:  0.40,
+  fireplace:  0.55,
+  wind:       0.45,
+  cat:        0.70,
+  lamp:       0.60,
+  chair:      0.65,
+  mouseClick: 0.50,
+  keyboard:   0.30,
+}
+// ────────────────────────────────────────────────────────────────────────────
 
-const DetailedCat = ({ targetPosition, active, isAtFireplace }) => {
+// 1. CHAIR COMPONENT
+const Chair = ({ position, isInteractive, isHovered }) => {
+  const groupRef = useRef()
+  const scaleRef = useRef(1)
+  const seatMatRef = useRef()
+  const backMatRef = useRef()
+
+  useFrame(() => {
+    const target = isHovered ? 1.07 : 1.0
+    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, target, 0.1)
+    if (groupRef.current) groupRef.current.scale.setScalar(scaleRef.current)
+    const emTarget = isHovered ? 0.35 : 0.0
+    if (seatMatRef.current) seatMatRef.current.emissiveIntensity = THREE.MathUtils.lerp(seatMatRef.current.emissiveIntensity, emTarget, 0.1)
+    if (backMatRef.current) backMatRef.current.emissiveIntensity = THREE.MathUtils.lerp(backMatRef.current.emissiveIntensity, emTarget, 0.1)
+  })
+
+  return (
+    <group ref={groupRef} position={position} rotation={[0, Math.PI, 0]} userData={{ interactive: isInteractive, type: 'chair' }}>
+      <mesh position={[0, 0.8, 0]} castShadow receiveShadow>
+        <boxGeometry args={[2.5, 0.4, 2.5]} />
+        <meshStandardMaterial ref={seatMatRef} color="#3d260b" emissive="#7a5320" emissiveIntensity={0} />
+      </mesh>
+      <mesh position={[0, 2.2, -1.1]} castShadow>
+        <boxGeometry args={[2.5, 2.5, 0.3]} />
+        <meshStandardMaterial ref={backMatRef} color="#3d260b" emissive="#7a5320" emissiveIntensity={0} />
+      </mesh>
+      {[[-1, 0.4, 1], [1, 0.4, 1], [-1, 0.4, -1], [1, 0.4, -1]].map((p, i) => (
+        <mesh key={i} position={p}>
+          <boxGeometry args={[0.3, 0.8, 0.3]} />
+          <meshStandardMaterial color="#1a1105" />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+const DetailedCat = ({ targetPosition, active, isAtFireplace, isHovered, canInteract }) => {
   const groupRef = useRef()
   const tailRef = useRef()
   const earLeftRef = useRef()
   const earRightRef = useRef()
+  const catScaleRef = useRef(1)
   const targetVec = new THREE.Vector3()
 
   useFrame((state) => {
@@ -52,6 +82,10 @@ const DetailedCat = ({ targetPosition, active, isAtFireplace }) => {
       if (earLeftRef.current) earLeftRef.current.rotation.z = 0.3 + Math.sin(state.clock.elapsedTime * 3) * 0.05
       if (earRightRef.current) earRightRef.current.rotation.z = -0.3 + Math.sin(state.clock.elapsedTime * 3.5) * 0.05
     }
+    // Hover bulge
+    const scaleTarget = (isHovered && canInteract) ? 1.08 : 1.0
+    catScaleRef.current = THREE.MathUtils.lerp(catScaleRef.current, scaleTarget, 0.1)
+    groupRef.current.scale.setScalar(catScaleRef.current)
   })
 
   const furColor = "#4a3520"
@@ -1022,30 +1056,104 @@ export const Scene = () => {
   const mainMusic = useRef(null)
   const windSound = useRef(null)
   const windIntervalRef = useRef(null)
+  const musicStartedRef = useRef(false)
   const prevCatPosition = useRef(catPosition)
   const prevView = useRef(view)
   const prevLampOn = useRef(lampOn)
+
+  // Lamp hover animation refs
+  const lampGroupRef = useRef()
+  const lampScaleRef = useRef(1)
+  const lampShadeMatRef = useRef()
+
+  // Proximity prompt state
+  const [proximityPrompt, setProximityPrompt] = useState(null)
+  const proximityPromptRef = useRef(null)
+
+  // Track first-interaction per object (for proximity prompts)
+  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false })
+
+  // Precomputed world positions for proximity checks
+  const lampWorldPos = useMemo(() => new THREE.Vector3(-40, 1.5, 50), [])
+  const chairWorldPos = useMemo(() => new THREE.Vector3(0, 0, 4.2), [])
   
   const sitPos = useMemo(() => new THREE.Vector3(0, 3.8, 3.5), []) 
   const deskLookAt = useMemo(() => new THREE.Vector3(0, 3.5, 11.5), [])
 
+  // Helper: fade main music in on first user gesture
+  const startMusicWithFade = () => {
+    if (musicStartedRef.current || !mainMusic.current) return
+    musicStartedRef.current = true
+    mainMusic.current.volume = 0
+    mainMusic.current.play().then(() => {
+      const fadeDuration = 3000
+      const fadeStart = Date.now()
+      const fadeInterval = setInterval(() => {
+        const progress = Math.min((Date.now() - fadeStart) / fadeDuration, 1)
+        if (mainMusic.current) mainMusic.current.volume = progress * VOLUMES.mainMusic
+        if (progress >= 1) clearInterval(fadeInterval)
+      }, 50)
+    }).catch(() => {})
+  }
+
   // Initialize audio files
   useEffect(() => {
     keyboardSound.current = new Audio('/sounds/keyboard.mp3')
-    mouseClickSound.current = new Audio('/sounds/mouse.wav')
-    keyboardSound.current.volume = 0.3
-    mouseClickSound.current.volume = 0.85 + Math.random() * 0.15;
+    keyboardSound.current.volume = VOLUMES.keyboard
 
-    keyboardSound.current.onerror = () => console.error('Failed to load keyboard.mp3')
-    mouseClickSound.current.onerror = () => console.error('Failed to load mouse-click.mp3')
-  
-    console.log('Audio files initialized')
+    mouseClickSound.current = new Audio('/sounds/mouse.wav')
+    mouseClickSound.current.volume = VOLUMES.mouseClick
+
+    catSound.current = new Audio('/sounds/cat.wav')
+    catSound.current.volume = VOLUMES.cat
+
+    chairSound.current = new Audio('/sounds/chair.m4a')
+    chairSound.current.volume = VOLUMES.chair
+
+    lampSound.current = new Audio('/sounds/lamp.wav')
+    lampSound.current.volume = VOLUMES.lamp
+
+    fireplaceSound.current = new Audio('/sounds/fireplace.m4a')
+    fireplaceSound.current.loop = true
+    fireplaceSound.current.volume = VOLUMES.fireplace
+
+    windSound.current = new Audio('/sounds/wind.mp3')
+    windSound.current.volume = VOLUMES.wind
+
+    mainMusic.current = new Audio('/sounds/mainMusic.mp3')
+    mainMusic.current.loop = true
+    mainMusic.current.volume = 0
   }, [])
 
-// Add this new useEffect after your existing useEffects
+  // Fireplace sound: loop while fireplace is active (lamp off)
+  useEffect(() => {
+    if (!fireplaceSound.current) return
+    if (!lampOn) {
+      fireplaceSound.current.play().catch(() => {})
+    } else {
+      fireplaceSound.current.pause()
+      fireplaceSound.current.currentTime = 0
+    }
+  }, [lampOn])
 
+  // Wind sound: plays every 10–15 seconds
+  useEffect(() => {
+    const scheduleWind = () => {
+      const delay = 10000 + Math.random() * 5000
+      windIntervalRef.current = setTimeout(() => {
+        if (windSound.current) {
+          const s = windSound.current.cloneNode()
+          s.volume = VOLUMES.wind
+          s.play().catch(() => {})
+        }
+        scheduleWind()
+      }, delay)
+    }
+    scheduleWind()
+    return () => clearTimeout(windIntervalRef.current)
+  }, [])
 
-  useEffect(() => { 
+  useEffect(() => {
     camera.position.set(-55, 4, 55)
     camera.lookAt(0, 4, 0)
     camera.near = 0.05
@@ -1056,27 +1164,27 @@ export const Scene = () => {
   }, [camera, scene, lightTarget])
 
   useEffect(() => {
-const handleKeyDown = (e) => { 
+const handleKeyDown = (e) => {
+  startMusicWithFade()
   const keys = { KeyW: 'forward', KeyS: 'backward', KeyA: 'left', KeyD: 'right' }
-  
+
   // Play keyboard sound if sitting (for ANY key press)
   if (isSitting && keyboardSound.current) {
     const sound = keyboardSound.current.cloneNode()
-    sound.volume = 0.3
-    sound.play().catch(err => console.log('Audio play failed:', err))
+    sound.volume = VOLUMES.keyboard
+    sound.play().catch(() => {})
   }
-  
+
   if (keys[e.code] && !(isSitting && pcOn)) {
     setMovement(m => ({ ...m, [keys[e.code]]: true }))
     if (isSitting) {
       // Request pointer lock IMMEDIATELY while we still have user gesture
       if (!pcOn) {
-        console.log('Attempting pointer lock...')
         document.body.requestPointerLock()
-          .then(() => console.log('Pointer lock SUCCESS'))
-          .catch(err => console.error('Pointer lock FAILED:', err))
+          .then(() => {})
+          .catch(() => {})
       }
-      standUp() 
+      standUp()
       camera.position.y = 4
     }
   }
@@ -1086,34 +1194,64 @@ const handleKeyDown = (e) => {
   }
 }
 
-
-  
   const handleKeyUp = (e) => {
     const keys = { KeyW: 'forward', KeyS: 'backward', KeyA: 'left', KeyD: 'right' }
     if (keys[e.code]) {
       setMovement((m) => ({ ...m, [keys[e.code]]: false }))
     }
   }
-  
-  const handleClick = () => {
-    // Don't handle scene clicks when PC is on - let the UI overlay handle them
-    if (isSitting && pcOn) {
-      return
+
+  const handleMouseDown = (e) => {
+    startMusicWithFade()
+
+    // Mouse click sound while PC is on (both left and right click)
+    if (isSitting && pcOn && mouseClickSound.current) {
+      const s = mouseClickSound.current.cloneNode()
+      s.volume = VOLUMES.mouseClick
+      s.play().catch(() => {})
     }
-    
-    if (lookingAtRef.current === 'lamp') toggleLamp()
-    else if (lookingAtRef.current === 'cat' && !lampOn) moveCat()
-    else if (lookingAtRef.current === 'chair') sitDown()
+
+    // Don't handle scene clicks when PC is on - let the UI overlay handle them
+    if (isSitting && pcOn) return
+
+    if (lookingAtRef.current === 'lamp') {
+      toggleLamp()
+      hasInteractedRef.current.lamp = true
+      if (lampSound.current) {
+        const s = lampSound.current.cloneNode()
+        s.volume = VOLUMES.lamp
+        s.play().catch(() => {})
+      }
+    } else if (lookingAtRef.current === 'cat' && !lampOn) {
+      moveCat()
+      hasInteractedRef.current.cat = true
+      if (catSound.current) {
+        const s = catSound.current.cloneNode()
+        s.volume = VOLUMES.cat
+        s.play().catch(() => {})
+      }
+    } else if (lookingAtRef.current === 'chair' && catPosition === 'fireplace') {
+      sitDown()
+      hasInteractedRef.current.chair = true
+      if (chairSound.current) {
+        const s = chairSound.current.cloneNode()
+        s.volume = VOLUMES.chair
+        s.play().catch(() => {})
+      }
+    } else if (lookingAtRef.current === 'chair') {
+      // Chair clicked but can't sit yet — no sound
+      sitDown()
+    }
   }
-  
+
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
-  window.addEventListener('mousedown', handleClick)
-  
-  return () => { 
+  window.addEventListener('mousedown', handleMouseDown)
+
+  return () => {
     window.removeEventListener('keydown', handleKeyDown)
     window.removeEventListener('keyup', handleKeyUp)
-    window.removeEventListener('mousedown', handleClick) 
+    window.removeEventListener('mousedown', handleMouseDown)
   }
 }, [lampOn, catPosition, isSitting, toggleLamp, moveCat, sitDown, standUp, camera, togglePc, pcOn])
 
@@ -1180,22 +1318,89 @@ useEffect(() => {
     const type = hit?.object.userData.type || hit?.object.parent?.userData.type
     setLookingAt(type)
     lookingAtRef.current = type
+
+    // Lamp hover scale + emissive lerp
+    const isLampHoverable = lookingAtRef.current === 'lamp'
+    lampScaleRef.current = THREE.MathUtils.lerp(lampScaleRef.current, isLampHoverable ? 1.08 : 1.0, 0.1)
+    if (lampGroupRef.current) lampGroupRef.current.scale.setScalar(lampScaleRef.current)
+    if (lampShadeMatRef.current) {
+      const baseIntensity = lampOn ? 2 : 0.1
+      const targetIntensity = isLampHoverable ? baseIntensity + 2.0 : baseIntensity
+      lampShadeMatRef.current.emissiveIntensity = THREE.MathUtils.lerp(lampShadeMatRef.current.emissiveIntensity, targetIntensity, 0.1)
+    }
+
+    // Proximity prompts
+    if (!isSitting) {
+      const camPos = state.camera.position
+      const catPos = catPosition === 'chair' ? new THREE.Vector3(0, 1.8, 4.2) : new THREE.Vector3(7, 0.4, -1)
+      const distLamp = camPos.distanceTo(lampWorldPos)
+      const distCat = camPos.distanceTo(catPos)
+      const distChair = camPos.distanceTo(chairWorldPos)
+
+      let prompt = null
+      if (!hasInteractedRef.current.lamp && distLamp < 15) prompt = 'the LAMP'
+      if (!hasInteractedRef.current.cat && !lampOn && distCat < 9) prompt = 'the CAT'
+      if (!hasInteractedRef.current.chair && catPosition === 'fireplace' && distChair < 9) prompt = 'the CHAIR'
+
+      if (prompt !== proximityPromptRef.current) {
+        proximityPromptRef.current = prompt
+        setProximityPrompt(prompt)
+      }
+    } else if (proximityPromptRef.current !== null) {
+      proximityPromptRef.current = null
+      setProximityPrompt(null)
+    }
   })
+
+  const canInteract = {
+    lamp: true,
+    cat: !lampOn,
+    chair: catPosition === 'fireplace',
+  }
+  const isHovered = {
+    lamp: lookingAt === 'lamp' && canInteract.lamp,
+    cat:  lookingAt === 'cat'  && canInteract.cat,
+    chair: lookingAt === 'chair' && canInteract.chair,
+  }
 
   return (
     <>
       {!isSitting && <PointerLockControls />}
-      
+
       <Snow />
       <Aurora />
       <MountainRange />
       <Fireplace position={[7, 0, -6]} active={!lampOn} />
-      
+
       <Html calculatePosition={() => [0, 0, 0]} style={{ pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100vw', height: '100vh' }}>
+        <style>{`
+          @keyframes promptPulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+          }
+        `}</style>
         {!(isSitting && pcOn) && (
           <div style={{ position: 'relative', width: '20px', height: '20px' }}>
             <div style={{ position: 'absolute', top: '50%', left: '0', width: '100%', height: '2px', backgroundColor: lookingAt ? '#a855f7' : 'white', boxShadow: lookingAt ? '0 0 8px #a855f7' : 'none', transition: 'all 0.1s' }} />
             <div style={{ position: 'absolute', left: '50%', top: '0', width: '2px', height: '100%', backgroundColor: lookingAt ? '#a855f7' : 'white', boxShadow: lookingAt ? '0 0 8px #a855f7' : 'none', transition: 'all 0.1s' }} />
+          </div>
+        )}
+        {proximityPrompt && !(isSitting && pcOn) && (
+          <div style={{
+            position: 'absolute',
+            top: '32px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            color: '#a855f7',
+            fontFamily: "'Courier New', monospace",
+            fontSize: '15px',
+            letterSpacing: '2px',
+            textShadow: '0 0 10px #a855f7, 0 0 20px #a855f7',
+            animation: 'promptPulse 1.5s ease-in-out infinite',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+          }}>
+            ▶ CLICK to interact with {proximityPrompt}
           </div>
         )}
       </Html>
@@ -1203,20 +1408,20 @@ useEffect(() => {
       <Sky sunPosition={[100, -30, 100]} />
       <Stars radius={1500} depth={100} count={20000} factor={70} fade />
       <ambientLight intensity={0.15} />
-      
+
       {!lampOn && (
-        <spotLight 
-            ref={spotlightRef} 
-            position={[0, 25, 12]} 
-            target={lightTarget} 
-            angle={0.8} 
-            penumbra={1} 
-            intensity={15} 
-            distance={0} 
-            decay={0} 
-            color="#ffdaab" 
-            castShadow 
-            shadow-mapSize={[1024, 1024]} 
+        <spotLight
+            ref={spotlightRef}
+            position={[0, 25, 12]}
+            target={lightTarget}
+            angle={0.8}
+            penumbra={1}
+            intensity={15}
+            distance={0}
+            decay={0}
+            color="#ffdaab"
+            castShadow
+            shadow-mapSize={[1024, 1024]}
         />
       )}
 
@@ -1234,20 +1439,23 @@ useEffect(() => {
         <Peripherals />
       </group>
 
-      <Chair position={[0, 0, 4.2]} isInteractive={true} />
+      <Chair position={[0, 0, 4.2]} isInteractive={true} isHovered={isHovered.chair} />
 
-      <group position={[-40, 1.5, 50]} userData={{ interactive: true, type: 'lamp' }}>
+      <group ref={lampGroupRef} position={[-40, 1.5, 50]} userData={{ interactive: true, type: 'lamp' }}>
         <mesh position={[0, 3, 0]} rotation={[0.4, 0, 0]}>
-          <cylinderGeometry args={[0.5, 1, 1.5]} /><meshStandardMaterial emissive={lampOn ? "#ccae3b" : "#000000"} emissiveIntensity={lampOn ? 2 : 0.1} color="#111" />
+          <cylinderGeometry args={[0.5, 1, 1.5]} />
+          <meshStandardMaterial ref={lampShadeMatRef} emissive={lampOn ? "#ccae3b" : "#442200"} emissiveIntensity={lampOn ? 2 : 0.1} color="#111" />
           {lampOn && <pointLight color="#dcd0b2" intensity={5} distance={20} />}
         </mesh>
         <mesh position={[0, 1, 0]}><cylinderGeometry args={[0.05, 0.05, 4]} /><meshStandardMaterial color="#111" /></mesh>
       </group>
 
-      <DetailedCat 
-        targetPosition={catPosition === 'chair' ? [0, 1.8, 4.2] : [7, 0.4, -1]} 
+      <DetailedCat
+        targetPosition={catPosition === 'chair' ? [0, 1.8, 4.2] : [7, 0.4, -1]}
         active={!lampOn}
-        isAtFireplace={catPosition === 'fireplace'} 
+        isAtFireplace={catPosition === 'fireplace'}
+        isHovered={isHovered.cat}
+        canInteract={canInteract.cat}
       />
 
       <EffectComposer>
