@@ -30,11 +30,15 @@ const BALL_HOLD_DISTANCE = 2.4  // units in front of camera the ball floats
 const BALL_SPAWN = [40, 0.55, -40] // where the ball rests when not held
 const HOOP_POS = [52, 13, -52]    // position of the hoop group
 const HOOP_ROT_Y = Math.PI * 0.75 // hoop group Y rotation (faces scene center)
-// World-space rim centre (computed from HOOP_POS + local offset rotated by HOOP_ROT_Y)
+// World-space rim centre — local rim offset [0, -0.98, -0.9] rotated by HOOP_ROT_Y.
+// R_y(θ): worldX = groupX + lz*sin(θ),  worldZ = groupZ + lz*cos(θ)  (lx=0)
+// lz = -0.9, sin(135°) = +0.7071, cos(135°) = -0.7071
+// worldX = 52 + (-0.9)(+0.7071) ≈ 51.36
+// worldZ = -52 + (-0.9)(-0.7071) ≈ -51.36
 const HOOP_RIM_WORLD = new THREE.Vector3(
-  HOOP_POS[0] + 0.9 * Math.sin(-Math.PI * 0.75), // local [0,-1,-0.9] → world
-  HOOP_POS[1] - 1.0,
-  HOOP_POS[2] + 0.9 * Math.cos(-Math.PI * 0.75)
+  HOOP_POS[0] + (-0.9) * Math.sin(HOOP_ROT_Y),
+  HOOP_POS[1] - 0.98,
+  HOOP_POS[2] + (-0.9) * Math.cos(HOOP_ROT_Y)
 )
 const FLIGHT_DURATION = 1.3 // seconds for ball arc
 // ────────────────────────────────────────────────────────────────────────────
@@ -1333,7 +1337,10 @@ export const Scene = () => {
   const proximityPromptRef = useRef(null)
 
   // Track first-interaction per object (for proximity prompts)
-  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false, basketball: false, shot: false })
+  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false, basketball: false, shot: false, pc: false })
+
+  // Snapshot of camera state taken the instant sitDown() fires — used to cancel the sit
+  const preSitStateRef = useRef({ x: 0, y: 4, z: 0, rotX: 0, rotY: 0 })
 
   // Precomputed world positions for proximity checks
   const lampWorldPos = useMemo(() => new THREE.Vector3(-40, 1.5, 50), [])
@@ -1511,13 +1518,19 @@ const handleKeyDown = (e) => {
           .catch(() => {})
       }
       standUp()
-      camera.position.y = 4
+      // Restore camera to the exact position + look-direction it had before sitting.
+      // This prevents the partial sit animation leaving the camera at a wrong angle.
+      const s = preSitStateRef.current
+      camera.position.set(s.x, 4, s.z)
+      camera.rotation.order = 'YXZ'
+      camera.rotation.set(s.rotX, s.rotY, 0)
     }
   }
   if (e.code === 'Space') {
     e.preventDefault()
     if (isSitting) {
       togglePc()
+      hasInteractedRef.current.pc = true
     } else if (holdingBallRef.current && !ballInFlightRef.current && !chargingRef.current) {
       // Start charging shot
       chargingRef.current = true
@@ -1597,6 +1610,8 @@ const handleKeyDown = (e) => {
         s.play().catch(() => {})
       }
     } else if (lookingAtRef.current === 'chair' && catPosition === 'fireplace') {
+      // Snapshot camera so we can restore if the player cancels mid-animation
+      preSitStateRef.current = { x: camera.position.x, y: camera.position.y, z: camera.position.z, rotX: camera.rotation.x, rotY: camera.rotation.y }
       sitDown()
       hasInteractedRef.current.chair = true
       if (chairSound.current) {
@@ -1606,6 +1621,7 @@ const handleKeyDown = (e) => {
       }
     } else if (lookingAtRef.current === 'chair') {
       // Chair clicked but can't sit yet — no sound
+      preSitStateRef.current = { x: camera.position.x, y: camera.position.y, z: camera.position.z, rotX: camera.rotation.x, rotY: camera.rotation.y }
       sitDown()
     }
   }
@@ -1684,6 +1700,13 @@ useEffect(() => {
       state.camera.position.z = Math.max(-55, Math.min(55, state.camera.position.z + direction.z))
 
       // ── BASKETBALL PHYSICS ──────────────────────────────────────────────
+      // Ball scale: full size (1.6) on floor, normal size (1.0) when held or in flight
+      if (basketballRef.current) {
+        const targetBallScale = (holdingBallRef.current || ballInFlightRef.current) ? 1.0 : 1.6
+        const curScale = basketballRef.current.scale.x
+        basketballRef.current.scale.setScalar(THREE.MathUtils.lerp(curScale, targetBallScale, 0.12))
+      }
+
       // Ball held: float in front of camera
       if (holdingBallRef.current && basketballRef.current && !ballInFlightRef.current) {
         const forward = new THREE.Vector3(0, -0.25, -BALL_HOLD_DISTANCE)
@@ -1792,20 +1815,24 @@ useEffect(() => {
         ? camPos.distanceTo(ballPos) : Infinity
 
       let prompt = null
-      if (!hasInteractedRef.current.lamp && distLamp < 15) prompt = 'the LAMP'
-      if (!hasInteractedRef.current.cat && !lampOn && distCat < 9) prompt = 'the CAT'
-      if (!hasInteractedRef.current.chair && catPosition === 'fireplace' && distChair < 9) prompt = 'the CHAIR'
-      if (!hasInteractedRef.current.basketball && distBall < 16) prompt = 'the BASKETBALL to pick up'
+      if (!hasInteractedRef.current.lamp && distLamp < 15) prompt = 'Click to interact with the lamp..'
+      if (!hasInteractedRef.current.cat && !lampOn && distCat < 9) prompt = 'Click on the cat!'
+      if (!hasInteractedRef.current.chair && catPosition === 'fireplace' && distChair < 9) prompt = 'Click on the chair..'
+      if (!hasInteractedRef.current.basketball && distBall < 16) prompt = 'Click on the basketball..'
       // Override with shot hint when holding (highest priority)
-      if (holdingBallRef.current && !hasInteractedRef.current.shot) prompt = 'SPACE to shoot'
+      if (holdingBallRef.current && !hasInteractedRef.current.shot) prompt = 'Hold spacebar to shoot!'
 
       if (prompt !== proximityPromptRef.current) {
         proximityPromptRef.current = prompt
         setProximityPrompt(prompt)
       }
-    } else if (proximityPromptRef.current !== null) {
-      proximityPromptRef.current = null
-      setProximityPrompt(null)
+    } else {
+      // Sitting: prompt to boot the PC until the player has pressed Space once
+      const prompt = (!pcOn && !hasInteractedRef.current.pc) ? 'Press SPACE to use the computer!' : null
+      if (prompt !== proximityPromptRef.current) {
+        proximityPromptRef.current = prompt
+        setProximityPrompt(prompt)
+      }
     }
   })
 
@@ -1864,7 +1891,7 @@ useEffect(() => {
             backdropFilter: 'blur(4px)',
             borderRadius: '4px',
           }}>
-            ▶ <TypedText text={`CLICK to interact with ${proximityPrompt}`} />
+            <TypedText text={proximityPrompt} />
           </div>
         )}
         {/* Basketball charge bar — right side, updated via ref from useFrame */}

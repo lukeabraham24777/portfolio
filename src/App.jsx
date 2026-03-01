@@ -78,10 +78,7 @@ const InstructionsOverlay = ({ visible }) => {
   const [show, setShow] = useState(false)
   
   useEffect(() => {
-    if (visible) {
-      const timer = setTimeout(() => setShow(true), 500)
-      return () => clearTimeout(timer)
-    }
+    if (visible) setShow(true)
   }, [visible])
   
   if (!visible || !show) return null
