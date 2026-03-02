@@ -36,29 +36,14 @@ export const useStore = create((set) => ({
 
 
 /*
-Sound Effects : fireplace crackle, wind blow, cat stir, cat purr, interact with lamp, interact with chair, walking
-Music
+Sound Effects : basketball swish, wind blow,interact with lamp, walking
 
-Lock WASD movement when sitting down
-
-Make cat look more like a cat
 
 Increase snowfall
 
 Glossy Floor
 
-Intro Menus: 
-    -slow blinking as if waking up
-    -wasd and look around with mouse instructions
-    -spacebar to interact with computer
-    -esc/spacebar to exit computer
-    -task list : lamp, cat, sit, computer
-    -some sort of indicator to show user where to go
     
-Easter eggs
-
-
-
 
 Design computer UI
 Populate computer
@@ -66,15 +51,9 @@ Populate computer
 
 
 
+Easter eggs
+Experimental graphics: aurora enhanced, shiyunli orb thingy
 
 
-
-
-
-Experimental graphics: aurora enhanced, 
-Custom Objects: basketball, 
-
-
-Purchase Domain and Host
 
 */
