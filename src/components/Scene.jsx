@@ -20,17 +20,21 @@ const VOLUMES = {
 // ────────────────────────────────────────────────────────────────────────────
 
 // ─── FRAME-RATE-INDEPENDENT MOTION ────────────────────────────────────────
-// Every bit of movement/animation below is normalised to a 60 FPS baseline so
-// speed is IDENTICAL on every machine — a 30 fps laptop and a 144 Hz desktop
-// travel the same distance per real-world second. Tune MOVE_SPEED to taste.
-const MOVE_SPEED = 6.0        // camera units per SECOND while walking (== 0.1/frame @ 60fps)
+// Every bit of movement/animation below is pinned to BASELINE_FPS so the whole
+// experience feels IDENTICAL on every machine — a 30 fps laptop and a 240 Hz
+// desktop all get the same speed per real-world second. The old code ran at
+// `constant × current-fps`, so it was tuned to how it felt on a 165 Hz display;
+// BASELINE_FPS = 165 reproduces exactly that feel for everyone. Change this one
+// number to make the whole thing faster/slower.
+const BASELINE_FPS = 165      // the experience is locked to feel like it did at this refresh rate
+const MOVE_SPEED = 0.1 * BASELINE_FPS   // 16.5 units/sec (old code moved 0.1 units PER FRAME)
 const MAX_DELTA  = 1 / 15     // clamp a single frame's delta so a stutter/tab-out can't teleport things
-// Reproduces a fixed-alpha lerp that was tuned at 60 FPS, at ANY frame rate.
+// Reproduces a fixed-alpha lerp that was tuned at BASELINE_FPS, at ANY frame rate.
 // `alpha` is the old per-frame lerp factor; `delta` is seconds since last frame.
 const fpsLerp = (current, target, alpha, delta) =>
-  THREE.MathUtils.lerp(current, target, 1 - Math.pow(1 - alpha, Math.min(delta, MAX_DELTA) * 60))
+  THREE.MathUtils.lerp(current, target, 1 - Math.pow(1 - alpha, Math.min(delta, MAX_DELTA) * BASELINE_FPS))
 // Same idea for slerp (quaternions).
-const fpsSlerpFactor = (alpha, delta) => 1 - Math.pow(1 - alpha, Math.min(delta, MAX_DELTA) * 60)
+const fpsSlerpFactor = (alpha, delta) => 1 - Math.pow(1 - alpha, Math.min(delta, MAX_DELTA) * BASELINE_FPS)
 // ────────────────────────────────────────────────────────────────────────────
 
 // ─── PROMPT Y POSITION — increase to move the interaction prompt lower ────
@@ -1381,7 +1385,7 @@ const Snow = ({ count = 10000 }) => {
     return temp;
   }, [count])
   useFrame((_, delta) => {
-    const step = Math.min(delta, MAX_DELTA) * 60 // 60fps-equivalent step → same fall speed everywhere
+    const step = Math.min(delta, MAX_DELTA) * BASELINE_FPS // baseline-equivalent step → same fall speed everywhere
     particles.forEach((particle, i) => { particle.pos[1] -= particle.speed * step; if (particle.pos[1] < 0) particle.pos[1] = 100; dummy.position.set(particle.pos[0], particle.pos[1], particle.pos[2]); dummy.updateMatrix(); mesh.current.setMatrixAt(i, dummy.matrix); });
     mesh.current.instanceMatrix.needsUpdate = true;
   });
@@ -1844,7 +1848,7 @@ useEffect(() => {
           q * q * start.y + 2 * q * t * peak.y + t * t * target.y,
           q * q * start.z + 2 * q * t * peak.z + t * t * target.z
         )
-        basketballRef.current.rotation.x += 0.06 * dt * 60
+        basketballRef.current.rotation.x += 0.06 * dt * BASELINE_FPS
 
         if (t >= 1.0) {
           ballInFlightRef.current = false
