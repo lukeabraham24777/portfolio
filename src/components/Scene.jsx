@@ -26,7 +26,7 @@ const VOLUMES = {
 // `constant × current-fps`, so it was tuned to how it felt on a 165 Hz display;
 // BASELINE_FPS = 165 reproduces exactly that feel for everyone. Change this one
 // number to make the whole thing faster/slower.
-const BASELINE_FPS = 165      // the experience is locked to feel like it did at this refresh rate
+const BASELINE_FPS = 144      // the experience is locked to feel like it did at this refresh rate
 const MOVE_SPEED = 0.1 * BASELINE_FPS   // 16.5 units/sec (old code moved 0.1 units PER FRAME)
 const MAX_DELTA  = 1 / 15     // clamp a single frame's delta so a stutter/tab-out can't teleport things
 // Reproduces a fixed-alpha lerp that was tuned at BASELINE_FPS, at ANY frame rate.
