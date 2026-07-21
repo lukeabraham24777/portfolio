@@ -19,8 +19,56 @@ const VOLUMES = {
 }
 // ────────────────────────────────────────────────────────────────────────────
 
+// ─── FRAME-RATE-INDEPENDENT MOTION ────────────────────────────────────────
+// Every bit of movement/animation below is normalised to a 60 FPS baseline so
+// speed is IDENTICAL on every machine — a 30 fps laptop and a 144 Hz desktop
+// travel the same distance per real-world second. Tune MOVE_SPEED to taste.
+const MOVE_SPEED = 6.0        // camera units per SECOND while walking (== 0.1/frame @ 60fps)
+const MAX_DELTA  = 1 / 15     // clamp a single frame's delta so a stutter/tab-out can't teleport things
+// Reproduces a fixed-alpha lerp that was tuned at 60 FPS, at ANY frame rate.
+// `alpha` is the old per-frame lerp factor; `delta` is seconds since last frame.
+const fpsLerp = (current, target, alpha, delta) =>
+  THREE.MathUtils.lerp(current, target, 1 - Math.pow(1 - alpha, Math.min(delta, MAX_DELTA) * 60))
+// Same idea for slerp (quaternions).
+const fpsSlerpFactor = (alpha, delta) => 1 - Math.pow(1 - alpha, Math.min(delta, MAX_DELTA) * 60)
+// ────────────────────────────────────────────────────────────────────────────
+
 // ─── PROMPT Y POSITION — increase to move the interaction prompt lower ────
 const PROMPT_TOP_PX = 80  // pixels from the top of the viewport
+// ────────────────────────────────────────────────────────────────────────────
+
+// ─── IN-COMPUTER OS CONTENT — everything the virtual desktop shows ─────────
+// PROJECTS is fully modular: add / remove / reorder objects here and the
+// Projects.exe window rebuilds itself automatically. `link` opens in a new tab.
+const PROJECTS = [
+  {
+    title: 'Cottage Portfolio',
+    blurb: 'This very world — an explorable 3D winter cabin with custom GLSL auroras, spatial audio, and a playable basketball mini-game.',
+    tech: ['React', 'Three.js', 'R3F', 'GLSL'],
+    link: 'https://github.com/lukeabraham',
+  },
+  {
+    title: 'Project Two',
+    blurb: 'Short description of what this project is and what makes it interesting. Replace this placeholder with your real work.',
+    tech: ['Tech', 'Stack', 'Here'],
+    link: 'https://github.com/lukeabraham',
+  },
+  {
+    title: 'Project Three',
+    blurb: 'Another placeholder. Duplicate one of these objects to add as many projects as you like — the grid scrolls.',
+    tech: ['Node', 'API'],
+    link: 'https://github.com/lukeabraham',
+  },
+]
+
+// Fill in your real handles / URLs. Email is prefilled; edit as needed.
+const CONTACT = {
+  github:   { url: 'https://github.com/lukeabraham',            handle: 'github.com/lukeabraham' },
+  linkedin: { url: 'https://www.linkedin.com/in/lukeabraham',   handle: 'in/lukeabraham' },
+  email:    { url: 'mailto:lukeabraham06@gmail.com',            handle: 'lukeabraham06@gmail.com' },
+}
+
+const RESUME_URL = '/resume.pdf'
 // ────────────────────────────────────────────────────────────────────────────
 
 // ─── BASKETBALL CONSTANTS — adjust to tune gameplay ──────────────────────
@@ -82,13 +130,13 @@ const Chair = ({ position, isInteractive, isHovered }) => {
   const seatMatRef = useRef()
   const backMatRef = useRef()
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const target = isHovered ? 1.07 : 1.0
-    scaleRef.current = THREE.MathUtils.lerp(scaleRef.current, target, 0.1)
+    scaleRef.current = fpsLerp(scaleRef.current, target, 0.1, delta)
     if (groupRef.current) groupRef.current.scale.setScalar(scaleRef.current)
     const emTarget = isHovered ? 0.35 : 0.0
-    if (seatMatRef.current) seatMatRef.current.emissiveIntensity = THREE.MathUtils.lerp(seatMatRef.current.emissiveIntensity, emTarget, 0.1)
-    if (backMatRef.current) backMatRef.current.emissiveIntensity = THREE.MathUtils.lerp(backMatRef.current.emissiveIntensity, emTarget, 0.1)
+    if (seatMatRef.current) seatMatRef.current.emissiveIntensity = fpsLerp(seatMatRef.current.emissiveIntensity, emTarget, 0.1, delta)
+    if (backMatRef.current) backMatRef.current.emissiveIntensity = fpsLerp(backMatRef.current.emissiveIntensity, emTarget, 0.1, delta)
   })
 
   return (
@@ -129,10 +177,10 @@ const DetailedCat = ({ targetPosition, active, isAtFireplace, isHovered, canInte
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (!groupRef.current) return
     targetVec.set(...targetPosition)
-    groupRef.current.position.lerp(targetVec, 0.05)
+    groupRef.current.position.lerp(targetVec, fpsSlerpFactor(0.05, delta))
     const distance = groupRef.current.position.distanceTo(targetVec)
 
     if (distance > 0.15) {
@@ -141,18 +189,18 @@ const DetailedCat = ({ targetPosition, active, isAtFireplace, isHovered, canInte
       const dz = targetVec.z - groupRef.current.position.z
       if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
         const travelYRot = Math.atan2(dx, dz)
-        groupRef.current.rotation.y = THREE.MathUtils.lerp(groupRef.current.rotation.y, travelYRot, 0.15)
+        groupRef.current.rotation.y = fpsLerp(groupRef.current.rotation.y, travelYRot, 0.15, delta)
       }
       // Gentle body sway while walking — X and Z always return to 0
       groupRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 10) * 0.05
-      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, 0, 0.1)
+      groupRef.current.rotation.x = fpsLerp(groupRef.current.rotation.x, 0, 0.1, delta)
     } else {
       // Settled at destination
-      groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, 0, 0.1)
-      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, 0, 0.1)
+      groupRef.current.rotation.z = fpsLerp(groupRef.current.rotation.z, 0, 0.1, delta)
+      groupRef.current.rotation.x = fpsLerp(groupRef.current.rotation.x, 0, 0.1, delta)
       // At chair → face the computer (−Z = Math.PI); at fireplace → face the fire (also −Z)
       const restRot = Math.PI
-      groupRef.current.rotation.y = THREE.MathUtils.lerp(groupRef.current.rotation.y, restRot, 0.1)
+      groupRef.current.rotation.y = fpsLerp(groupRef.current.rotation.y, restRot, 0.1, delta)
     }
 
     if (isAtFireplace && distance < 0.2) {
@@ -163,7 +211,7 @@ const DetailedCat = ({ targetPosition, active, isAtFireplace, isHovered, canInte
     }
 
     const scaleTarget = (isHovered && canInteract) ? 1.08 : 1.0
-    catScaleRef.current = THREE.MathUtils.lerp(catScaleRef.current, scaleTarget, 0.1)
+    catScaleRef.current = fpsLerp(catScaleRef.current, scaleTarget, 0.1, delta)
     groupRef.current.scale.setScalar(catScaleRef.current)
   })
 
@@ -910,109 +958,193 @@ const BasketballMesh = ({ meshRef }) => (
 )
 // ────────────────────────────────────────────────────────────────────────────
 
+// ─── In-computer OS icons — real brand marks, kept calm & de-saturated ────
+// currentColor lets the tile control the tone (muted slate → brightens on hover),
+// so they read as clean monochrome logos rather than their loud native colors.
+const GithubIcon = (p) => (
+  <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor" {...p}>
+    <path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.5v-1.7c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.6 18 4.9 18 4.9c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5Z" />
+  </svg>
+)
+const LinkedinIcon = (p) => (
+  <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor" {...p}>
+    <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.07 2.07 0 1 1 0-4.14 2.07 2.07 0 0 1 0 4.14ZM7.12 20.45H3.55V9h3.57v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.22.79 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.73V1.73C24 .77 23.2 0 22.22 0Z" />
+  </svg>
+)
+const MailIcon = (p) => (
+  <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor" {...p}>
+    <path d="M2 4h20c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H2c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2Zm0 2v.4l10 6.2 10-6.2V6H2Zm20 2.9-9.47 5.87a1 1 0 0 1-1.06 0L2 8.9V18h20V8.9Z" />
+  </svg>
+)
+const CONTACT_ICONS = { github: GithubIcon, linkedin: LinkedinIcon, email: MailIcon }
+
+const ContactTile = ({ type, label, href, sub }) => {
+  const [h, setH] = useState(false)
+  const Icon = CONTACT_ICONS[type]
+  const isMail = href.startsWith('mailto:')
+  return (
+    <a
+      href={href}
+      target={isMail ? undefined : '_blank'}
+      rel="noreferrer"
+      onMouseEnter={() => setH(true)}
+      onMouseLeave={() => setH(false)}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px',
+        textDecoration: 'none', width: '150px', padding: '20px 14px', borderRadius: '12px',
+        // Calm, de-saturated slate — brightens softly on hover (no brand colors)
+        color: h ? '#e6edf6' : '#8b9bb4',
+        border: `1px solid ${h ? 'rgba(214,224,238,0.45)' : 'rgba(139,155,180,0.22)'}`,
+        background: h ? 'rgba(214,224,238,0.06)' : 'rgba(139,155,180,0.03)',
+        boxShadow: h ? '0 0 22px rgba(180,200,230,0.18)' : 'none',
+        transform: h ? 'translateY(-3px)' : 'none',
+        transition: 'all 0.2s ease', fontFamily: "'Courier New', monospace",
+      }}
+    >
+      <Icon width={36} height={36} />
+      <span style={{ fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px' }}>{label}</span>
+      <span style={{ fontSize: '10px', opacity: 0.75, textAlign: 'center', wordBreak: 'break-all' }}>{sub}</span>
+    </a>
+  )
+}
+
+// Home desktop app launcher tile
+const AppTile = ({ app, onOpen }) => {
+  const [h, setH] = useState(false)
+  return (
+    <button
+      onClick={onOpen}
+      onMouseEnter={() => setH(true)}
+      onMouseLeave={() => setH(false)}
+      style={{
+        cursor: 'pointer', background: h ? `${app.color}18` : 'transparent',
+        border: `2px solid ${app.color}`, color: app.color, borderRadius: '8px',
+        padding: '20px 10px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+        fontFamily: "'Courier New', monospace",
+        boxShadow: h ? `0 0 24px ${app.color}66` : `0 0 8px ${app.color}22`,
+        transform: h ? 'translateY(-3px)' : 'none', transition: 'all 0.18s ease',
+      }}
+    >
+      <span style={{ fontSize: '30px', textShadow: `0 0 12px ${app.color}` }}>{app.glyph}</span>
+      <span style={{ fontSize: '13px', fontWeight: 'bold', letterSpacing: '1px' }}>{app.label}</span>
+      <span style={{ fontSize: '10px', color: '#94a3b8' }}>{app.desc}</span>
+    </button>
+  )
+}
+
+// Shared window chrome — hosts the top-left BACK button every sub-screen needs
+const WindowChrome = ({ title, accent, onBack, right, children }) => {
+  const [bh, setBh] = useState(false)
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', zIndex: 20 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+        borderBottom: `1px solid ${accent}55`, background: 'rgba(0,0,0,0.35)', flexShrink: 0,
+      }}>
+        {/* ← top-left back button */}
+        <button
+          onClick={onBack}
+          onMouseEnter={() => setBh(true)}
+          onMouseLeave={() => setBh(false)}
+          style={{
+            cursor: 'pointer', background: bh ? accent : 'transparent',
+            color: bh ? '#0a0f1a' : accent, border: `2px solid ${accent}`, borderRadius: '6px',
+            padding: '5px 12px', fontFamily: "'Courier New', monospace", fontWeight: 'bold',
+            fontSize: '12px', boxShadow: `0 0 10px ${accent}55`, transition: 'all 0.15s ease',
+          }}
+        >
+          ‹ BACK
+        </button>
+        <span style={{ color: accent, fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px', textShadow: `0 0 10px ${accent}` }}>{title}</span>
+        <span style={{ marginLeft: 'auto' }}>{right}</span>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ── PROJECTS.EXE — rebuilds from the PROJECTS array (fully modular) ──
+const ProjectCard = ({ p }) => {
+  const [h, setH] = useState(false)
+  return (
+    <div
+      onMouseEnter={() => setH(true)}
+      onMouseLeave={() => setH(false)}
+      style={{
+        border: `1px solid ${h ? 'rgba(56,189,248,0.6)' : 'rgba(56,189,248,0.22)'}`,
+        borderRadius: '8px', padding: '14px 16px',
+        background: h ? 'rgba(56,189,248,0.06)' : 'rgba(56,189,248,0.02)',
+        boxShadow: h ? '0 0 20px rgba(56,189,248,0.15)' : 'none', transition: 'all 0.2s ease',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }}>
+        <h3 style={{ margin: 0, color: '#38bdf8', fontSize: '16px', textShadow: '0 0 8px rgba(56,189,248,0.5)' }}>{p.title}</h3>
+        {p.link && (
+          <a href={p.link} target="_blank" rel="noreferrer" style={{ color: '#4ade80', fontSize: '11px', textDecoration: 'none', fontWeight: 'bold', whiteSpace: 'nowrap' }}>VIEW →</a>
+        )}
+      </div>
+      <p style={{ margin: '8px 0 10px', fontSize: '12px', lineHeight: 1.5, color: '#cbd5e1' }}>{p.blurb}</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        {p.tech.map(t => (
+          <span key={t} style={{ fontSize: '10px', color: '#94a3b8', border: '1px solid #334155', borderRadius: '4px', padding: '2px 7px' }}>{t}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+const ProjectsView = () => (
+  <div style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+    {PROJECTS.map((p, i) => <ProjectCard key={i} p={p} />)}
+  </div>
+)
+
+// ── RESUME.PDF — native browser PDF viewer (zoom / scroll / download) ──
+const ResumeView = () => (
+  <iframe
+    title="Resume"
+    src={`${RESUME_URL}#view=FitH`}
+    style={{ width: '100%', height: '100%', border: 'none', background: '#525659', display: 'block' }}
+  />
+)
+
+// ── CONTACT.SH — calm monochrome social links ──
+const ContactView = () => (
+  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', gap: '24px' }}>
+    <div style={{ textAlign: 'center' }}>
+      <h2 style={{ margin: 0, color: '#e6edf6', fontSize: '20px', letterSpacing: '3px' }}>LET&apos;S CONNECT</h2>
+      <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#94a3b8' }}>Reach me through any of these channels.</p>
+    </div>
+    <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'center' }}>
+      <ContactTile type="github"   label="GITHUB"   href={CONTACT.github.url}   sub={CONTACT.github.handle} />
+      <ContactTile type="linkedin" label="LINKEDIN" href={CONTACT.linkedin.url} sub={CONTACT.linkedin.handle} />
+      <ContactTile type="email"    label="EMAIL"    href={CONTACT.email.url}    sub={CONTACT.email.handle} />
+    </div>
+  </div>
+)
+
 const Computer = ({ pcOn, isSitting }) => {
   const screenMat = useRef()
-  const [hoveredButton, setHoveredButton] = useState(null)
-  const containerRef = useRef(null)
-  const cursorRef = useRef(null)
+  const [screen, setScreen] = useState('home') // 'home' | 'projects' | 'resume' | 'contact'
 
-  // Store cursor position
-  const cursorPosRef = useRef({ x: 350, y: 200 })
+  // Always boot back to the desktop whenever the PC is powered off
+  useEffect(() => { if (!pcOn) setScreen('home') }, [pcOn])
 
-  // Button hitboxes (x, y, width, height) - positions relative to container
-  // These will be at the bottom of the screen in the button area
-  const buttons = [
-    { id: 'projects', label: '[PROJECTS.EXE]', color: '#38bdf8', x: 24, y: 340, width: 120, height: 36, action: 'Project Alpha Loaded' },
-    { id: 'resume', label: '[RESUME.PDF]', color: '#a855f7', x: 160, y: 340, width: 110, height: 36, action: 'Resume.pdf downloaded' },
-    { id: 'contact', label: '[CONTACT.SH]', color: '#4ade80', x: 286, y: 340, width: 110, height: 36, action: 'Contact info loaded' },
-  ]
-
-  // Check if cursor is within a button's bounds
-  const getButtonAtCursor = (cx, cy) => {
-    for (const btn of buttons) {
-      if (cx >= btn.x && cx <= btn.x + btn.width && cy >= btn.y && cy <= btn.y + btn.height) {
-        return btn
-      }
-    }
-    return null
-  }
-
-  // Track mouse movement and clicks
-  useEffect(() => {
-    if (!pcOn || !isSitting) return
-
-    const CONTAINER_WIDTH = 760
-    const CONTAINER_HEIGHT = 440
-    const CURSOR_SIZE = 24
-
-    const handleMouseMove = (e) => {
-      if (!cursorRef.current || !containerRef.current) return
-
-      const rect = containerRef.current.getBoundingClientRect()
-      const relX = e.clientX - rect.left
-      const relY = e.clientY - rect.top
-
-      // Only sync cursor when the real mouse is within the monitor area
-      if (relX >= 0 && relY >= 0 && relX <= rect.width && relY <= rect.height) {
-        // Map screen-space position → virtual container space (always in sync)
-        cursorPosRef.current.x = Math.max(0, Math.min(CONTAINER_WIDTH - CURSOR_SIZE,
-          (relX / rect.width) * CONTAINER_WIDTH))
-        cursorPosRef.current.y = Math.max(0, Math.min(CONTAINER_HEIGHT - CURSOR_SIZE,
-          (relY / rect.height) * CONTAINER_HEIGHT))
-
-        cursorRef.current.style.transform = `translate(${cursorPosRef.current.x}px, ${cursorPosRef.current.y}px)`
-
-        // Check hover state
-        const hovered = getButtonAtCursor(cursorPosRef.current.x + CURSOR_SIZE / 2, cursorPosRef.current.y + CURSOR_SIZE / 2)
-        setHoveredButton(hovered?.id || null)
-      }
-      // Outside monitor: leave cursor at last valid position (no drift)
-    }
-
-    const handleClick = () => {
-      // Check which button (if any) the cursor is over
-      const btn = getButtonAtCursor(cursorPosRef.current.x + 12, cursorPosRef.current.y + 12)
-      if (btn) {
-        alert(btn.action)
-      }
-    }
-
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mousedown', handleClick)
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mousedown', handleClick)
-    }
-  }, [pcOn, isSitting])
-
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (screenMat.current) {
       const targetIntensity = pcOn ? 0.8 : 0
-      screenMat.current.emissiveIntensity = THREE.MathUtils.lerp(screenMat.current.emissiveIntensity, targetIntensity, 0.1)
+      screenMat.current.emissiveIntensity = fpsLerp(screenMat.current.emissiveIntensity, targetIntensity, 0.1, delta)
     }
   })
 
-  const getButtonStyle = (btn) => ({
-    position: 'absolute',
-    left: btn.x + 'px',
-    top: btn.y + 'px',
-    width: btn.width + 'px',
-    height: btn.height + 'px',
-    background: hoveredButton === btn.id ? btn.color : 'transparent',
-    border: `2px solid ${btn.color}`,
-    color: hoveredButton === btn.id ? '#0a0f1a' : btn.color,
-    fontSize: '12px',
-    fontFamily: "'Courier New', monospace",
-    fontWeight: 'bold',
-    textShadow: hoveredButton === btn.id ? 'none' : `0 0 5px ${btn.color}`,
-    boxShadow: hoveredButton === btn.id ? `0 0 25px ${btn.color}` : `0 0 10px ${btn.color}33`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'none',
-    zIndex: 10,
-  })
+  const apps = [
+    { id: 'projects', label: 'PROJECTS.EXE', color: '#38bdf8', glyph: '▤', desc: 'Selected work' },
+    { id: 'resume',   label: 'RESUME.PDF',   color: '#a855f7', glyph: '▦', desc: 'Résumé / CV' },
+    { id: 'contact',  label: 'CONTACT.SH',   color: '#4ade80', glyph: '▣', desc: 'Get in touch' },
+  ]
+  const accents = { projects: '#38bdf8', resume: '#a855f7', contact: '#4ade80' }
+  const titles = { projects: 'PROJECTS.EXE', resume: 'RESUME.PDF', contact: 'CONTACT.SH' }
 
   return (
     <group position={[0, 3.5, -1.5]} userData={{ interactive: true, type: 'computer' }}>
@@ -1030,122 +1162,77 @@ const Computer = ({ pcOn, isSitting }) => {
         />
       </mesh>
 
-      {/* Screen UI rendered in 3D space */}
+      {/* Screen UI rendered in 3D space — real DOM so links, the PDF viewer and
+          scrolling all work natively */}
       {pcOn && isSitting && (
-        <Html
-          transform
-          position={[0, 0, 0.08]}
-          scale={0.21}
-        >
+        <Html transform position={[0, 0, 0.08]} scale={0.21}>
           <div
-            ref={containerRef}
             style={{
               width: '760px',
               height: '440px',
               background: '#0a0f1a',
               color: 'white',
               fontFamily: "'Courier New', monospace",
-              padding: '24px',
               borderRadius: '8px',
-              display: 'flex',
-              flexDirection: 'column',
               overflow: 'hidden',
               boxShadow: 'inset 0 0 80px rgba(56, 189, 248, 0.1)',
-              userSelect: 'none',
-              cursor: 'none',
               position: 'relative',
+              pointerEvents: 'auto',
             }}
           >
-            {/* CRT Scanlines */}
-            <div style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px)',
-              pointerEvents: 'none',
-              zIndex: 100,
-              borderRadius: '8px',
-            }} />
-
-            {/* CRT Vignette */}
-            <div style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.4) 100%)',
-              pointerEvents: 'none',
-              zIndex: 99,
-              borderRadius: '8px',
-            }} />
-
-            {/* Retro Cursor */}
-            <div
-              ref={cursorRef}
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                width: '24px',
-                height: '28px',
-                pointerEvents: 'none',
-                zIndex: 1000,
-                willChange: 'transform',
-              }}
-            >
-              <svg width="24" height="28" viewBox="0 0 20 24">
-                <polygon
-                  points="0,0 0,20 5,15 9,23 12,22 8,14 14,14"
-                  fill={hoveredButton ? "#38bdf8" : "#fff"}
-                  stroke="#000"
-                  strokeWidth="1.5"
-                />
-              </svg>
-            </div>
-
-            {/* Content */}
-            <h1 style={{
-              color: '#38bdf8',
-              fontSize: '24px',
-              textShadow: '0 0 15px #38bdf8',
-              marginBottom: '8px',
-              position: 'relative',
-              zIndex: 10,
-            }}>
-              {'>'} SYSTEM_ONLINE
-            </h1>
-            <p style={{
-              fontSize: '12px',
-              color: '#94a3b8',
-              marginBottom: '16px',
-              position: 'relative',
-              zIndex: 10,
-            }}>
-              Welcome to the portfolio terminal. Select an option below.
-            </p>
-
-            {/* Button hitboxes - rendered as divs */}
-            {buttons.map(btn => (
-              <div key={btn.id} style={getButtonStyle(btn)}>
-                {btn.label}
+            {/* HOME DESKTOP */}
+            {screen === 'home' && (
+              <div style={{ position: 'absolute', inset: 0, padding: '24px', display: 'flex', flexDirection: 'column', zIndex: 20 }}>
+                <h1 style={{ color: '#38bdf8', fontSize: '24px', textShadow: '0 0 15px #38bdf8', margin: '0 0 6px' }}>
+                  {'>'} SYSTEM_ONLINE
+                </h1>
+                <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 22px' }}>
+                  Welcome to the portfolio terminal. Select a program.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+                  {apps.map(a => <AppTile key={a.id} app={a} onOpen={() => setScreen(a.id)} />)}
+                </div>
+                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#475569', borderTop: '1px solid #1e3a5f', paddingTop: '8px' }}>
+                  <span>USER: GUEST</span>
+                  <span style={{ color: '#4ade80' }}>● ONLINE</span>
+                  <span>ESC TO EXIT</span>
+                </div>
               </div>
-            ))}
+            )}
 
-            {/* Bottom status bar */}
+            {/* SUB-WINDOWS — each carries the top-left BACK button via WindowChrome */}
+            {screen !== 'home' && (
+              <WindowChrome
+                title={titles[screen]}
+                accent={accents[screen]}
+                onBack={() => setScreen('home')}
+                right={screen === 'resume' ? (
+                  <a
+                    href={RESUME_URL}
+                    download
+                    style={{ color: '#a855f7', border: '2px solid #a855f7', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 'bold', textDecoration: 'none', boxShadow: '0 0 10px #a855f755' }}
+                  >
+                    ↓ DOWNLOAD
+                  </a>
+                ) : null}
+              >
+                {screen === 'projects' && <ProjectsView />}
+                {screen === 'resume' && <ResumeView />}
+                {screen === 'contact' && <ContactView />}
+              </WindowChrome>
+            )}
+
+            {/* CRT overlays — pointerEvents:none so they never block clicks */}
             <div style={{
-              position: 'absolute',
-              bottom: '24px',
-              left: '24px',
-              right: '24px',
-              paddingTop: '8px',
-              borderTop: '1px solid #1e3a5f',
-              display: 'flex',
-              justifyContent: 'space-between',
-              fontSize: '10px',
-              color: '#475569',
-              zIndex: 10,
-            }}>
-              <span>USER: GUEST</span>
-              <span style={{ color: '#4ade80' }}>● ONLINE</span>
-              <span>ESC TO EXIT</span>
-            </div>
+              position: 'absolute', inset: 0,
+              background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px)',
+              pointerEvents: 'none', zIndex: 100, borderRadius: '8px',
+            }} />
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.4) 100%)',
+              pointerEvents: 'none', zIndex: 99, borderRadius: '8px',
+            }} />
           </div>
         </Html>
       )}
@@ -1293,8 +1380,9 @@ const Snow = ({ count = 10000 }) => {
     const temp = []; for (let i = 0; i < count; i++) temp.push({ speed: 0.02 + Math.random() * 0.03, pos: [Math.random() * 400 - 200, Math.random() * 100, Math.random() * 400 - 200] })
     return temp;
   }, [count])
-  useFrame(() => {
-    particles.forEach((particle, i) => { particle.pos[1] -= particle.speed; if (particle.pos[1] < 0) particle.pos[1] = 100; dummy.position.set(particle.pos[0], particle.pos[1], particle.pos[2]); dummy.updateMatrix(); mesh.current.setMatrixAt(i, dummy.matrix); });
+  useFrame((_, delta) => {
+    const step = Math.min(delta, MAX_DELTA) * 60 // 60fps-equivalent step → same fall speed everywhere
+    particles.forEach((particle, i) => { particle.pos[1] -= particle.speed * step; if (particle.pos[1] < 0) particle.pos[1] = 100; dummy.position.set(particle.pos[0], particle.pos[1], particle.pos[2]); dummy.updateMatrix(); mesh.current.setMatrixAt(i, dummy.matrix); });
     mesh.current.instanceMatrix.needsUpdate = true;
   });
   return <instancedMesh ref={mesh} args={[null, null, count]}><sphereGeometry args={[0.04, 4, 4]} /><meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={0.8} /></instancedMesh>
@@ -1679,19 +1767,21 @@ useEffect(() => {
     if (isSitting) {
       if (zoomedIn) {
         const zoomedPos = new THREE.Vector3(0, 3.5, -1.3)
-        state.camera.position.lerp(zoomedPos, 0.05)
+        state.camera.position.lerp(zoomedPos, fpsSlerpFactor(0.05, delta))
       } else {
-        state.camera.position.lerp(sitPos, 0.03)
+        state.camera.position.lerp(sitPos, fpsSlerpFactor(0.03, delta))
       }
 
       const dummy = new THREE.Object3D()
       dummy.position.copy(state.camera.position)
       dummy.lookAt(deskLookAt)
 
-      state.camera.quaternion.slerp(dummy.quaternion, 0.03)
+      state.camera.quaternion.slerp(dummy.quaternion, fpsSlerpFactor(0.03, delta))
       state.camera.updateMatrixWorld()
     } else {
-      const velocity = 0.1
+      const dt = Math.min(delta, MAX_DELTA)
+      // Distance travelled this frame = speed(units/sec) × seconds elapsed → frame-rate independent
+      const velocity = MOVE_SPEED * dt
       const direction = new THREE.Vector3()
       const frontVector = new THREE.Vector3(0, 0, Number(movement.backward) - Number(movement.forward))
       const sideVector = new THREE.Vector3(Number(movement.left) - Number(movement.right), 0, 0)
@@ -1704,7 +1794,7 @@ useEffect(() => {
       if (basketballRef.current) {
         const targetBallScale = (holdingBallRef.current || ballInFlightRef.current) ? 1.0 : 1.6
         const curScale = basketballRef.current.scale.x
-        basketballRef.current.scale.setScalar(THREE.MathUtils.lerp(curScale, targetBallScale, 0.12))
+        basketballRef.current.scale.setScalar(fpsLerp(curScale, targetBallScale, 0.12, dt))
       }
 
       // Ball held: float in front of camera
@@ -1719,7 +1809,7 @@ useEffect(() => {
 
       // Charging: oscillate charge bar + crouch camera
       if (chargingRef.current && !ballInFlightRef.current) {
-        cameraYOffsetRef.current = THREE.MathUtils.lerp(cameraYOffsetRef.current, -0.5, 0.1)
+        cameraYOffsetRef.current = fpsLerp(cameraYOffsetRef.current, -0.5, 0.1, dt)
         if (chargingUpRef.current) {
           chargeLevelRef.current = Math.min(1.0, chargeLevelRef.current + SHOT_METER_SPEED * delta)
           if (chargeLevelRef.current >= 1.0) chargingUpRef.current = false
@@ -1732,7 +1822,7 @@ useEffect(() => {
         }
       } else {
         // Lerp camera Y offset back to 0 (return from crouch or settle after jump)
-        cameraYOffsetRef.current = THREE.MathUtils.lerp(cameraYOffsetRef.current, 0, 0.08)
+        cameraYOffsetRef.current = fpsLerp(cameraYOffsetRef.current, 0, 0.08, dt)
       }
 
       // Ball in flight: quadratic Bezier arc
@@ -1754,7 +1844,7 @@ useEffect(() => {
           q * q * start.y + 2 * q * t * peak.y + t * t * target.y,
           q * q * start.z + 2 * q * t * peak.z + t * t * target.z
         )
-        basketballRef.current.rotation.x += 0.06
+        basketballRef.current.rotation.x += 0.06 * dt * 60
 
         if (t >= 1.0) {
           ballInFlightRef.current = false
@@ -1793,12 +1883,12 @@ useEffect(() => {
 
     // Lamp hover scale + emissive lerp
     const isLampHoverable = lookingAtRef.current === 'lamp'
-    lampScaleRef.current = THREE.MathUtils.lerp(lampScaleRef.current, isLampHoverable ? 1.08 : 1.0, 0.1)
+    lampScaleRef.current = fpsLerp(lampScaleRef.current, isLampHoverable ? 1.08 : 1.0, 0.1, delta)
     if (lampGroupRef.current) lampGroupRef.current.scale.setScalar(lampScaleRef.current)
     if (lampShadeMatRef.current) {
       const baseIntensity = lampOn ? 2 : 0.1
       const targetIntensity = isLampHoverable ? baseIntensity + 2.0 : baseIntensity
-      lampShadeMatRef.current.emissiveIntensity = THREE.MathUtils.lerp(lampShadeMatRef.current.emissiveIntensity, targetIntensity, 0.1)
+      lampShadeMatRef.current.emissiveIntensity = fpsLerp(lampShadeMatRef.current.emissiveIntensity, targetIntensity, 0.1, delta)
     }
 
     // Proximity prompts

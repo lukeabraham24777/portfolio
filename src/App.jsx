@@ -178,8 +178,7 @@ function App() {
   const pcOn = useStore((state) => state.pcOn)
   const view = useStore((state) => state.view)
   const [wakeUpComplete, setWakeUpComplete] = useState(false)
-  
-  const isSitting = view === 'room'
+
   const handleWakeUpComplete = useCallback(() => setWakeUpComplete(true), [])
 
   useEffect(() => {
@@ -189,7 +188,7 @@ function App() {
   }, [standUp])
 
   return (
-    <div style={{ width: '100vw', height: '100vh', cursor: pcOn && isSitting ? 'none' : 'auto' }}>
+    <div style={{ width: '100vw', height: '100vh', cursor: 'auto' }}>
       <WakeUpOverlay onComplete={handleWakeUpComplete} />
       <Canvas>
         <Scene />
