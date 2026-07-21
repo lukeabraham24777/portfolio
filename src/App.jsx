@@ -168,7 +168,41 @@ const InstructionsOverlay = ({ visible }) => {
         <div className="key-box">ESC</div>
         <span>STAND UP</span>
       </div>
+
+      <div className="instruction-line" style={{ animationDelay: '1s' }}>
+        <div className="key-box">+</div>
+        <span>ADVANCED DETAILS</span>
+      </div>
     </div>
+    </div>
+  )
+}
+
+// Performance HUD — plain DOM overlay, top-left, left-aligned with the
+// instructions panel. Data + visibility come from the store; toggle with '+'.
+const StatsOverlay = () => {
+  const visible = useStore((s) => s.statsVisible)
+  const s = useStore((st) => st.stats)
+  if (!visible) return null
+  return (
+    <div style={{
+      position: 'fixed', left: '24px', top: '24px', zIndex: 100,
+      padding: '12px 16px',
+      background: 'rgba(5, 5, 5, 0.80)',
+      border: '1px solid rgba(168, 85, 247, 0.55)',
+      boxShadow: '0 0 18px rgba(168, 85, 247, 0.25), inset 0 0 16px rgba(168, 85, 247, 0.06)',
+      backdropFilter: 'blur(4px)', borderRadius: '4px',
+    }}>
+      <pre style={{
+        margin: 0, color: '#a855f7', textShadow: '0 0 10px #a855f7',
+        font: "12px/1.55 'Courier New', monospace", letterSpacing: '1px', whiteSpace: 'pre',
+      }}>{`FPS         ${s.fps}
+draw calls  ${s.calls}
+tris        ${s.tris}k
+geometries  ${s.geometries}
+textures    ${s.textures}
+programs    ${s.programs}
+JS heap     ${s.heap} MB`}</pre>
     </div>
   )
 }
@@ -177,15 +211,21 @@ function App() {
   const standUp = useStore((state) => state.standUp)
   const pcOn = useStore((state) => state.pcOn)
   const view = useStore((state) => state.view)
+  const toggleStats = useStore((state) => state.toggleStats)
   const [wakeUpComplete, setWakeUpComplete] = useState(false)
 
   const handleWakeUpComplete = useCallback(() => setWakeUpComplete(true), [])
 
   useEffect(() => {
-    const handleEsc = (e) => { if (e.key === 'Escape') standUp() }
-    window.addEventListener('keydown', handleEsc)
-    return () => window.removeEventListener('keydown', handleEsc)
-  }, [standUp])
+    const handleKey = (e) => {
+      if (e.key === 'Escape') standUp()
+      // '+' (or '=' on the same key) toggles the advanced-details HUD; ignore
+      // when a modifier is held so browser zoom (Cmd/Ctrl +) isn't hijacked.
+      if ((e.key === '+' || e.key === '=') && !e.ctrlKey && !e.metaKey && !e.altKey) toggleStats()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [standUp, toggleStats])
 
   return (
     <div style={{ width: '100vw', height: '100vh', cursor: 'auto' }}>
@@ -198,6 +238,7 @@ function App() {
       </Canvas>
       <Overlay />
       <InstructionsOverlay visible={wakeUpComplete && !pcOn && view === 'orbit'} />
+      <StatsOverlay />
     </div>
   )
 }

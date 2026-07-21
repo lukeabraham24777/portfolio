@@ -6,6 +6,12 @@ export const useStore = create((set) => ({
   view: 'orbit',        // INITIAL STATE: 'orbit' (standing) or 'room' (sitting)
   pcOn: false,          // Computer power state
 
+  // Performance HUD ("advanced details"), toggled with the '+' key
+  statsVisible: false,
+  stats: { fps: 0, calls: 0, tris: 0, geometries: 0, textures: 0, programs: 0, heap: 0 },
+  toggleStats: () => set((state) => ({ statsVisible: !state.statsVisible })),
+  setStats: (stats) => set({ stats }),
+
   toggleLamp: () => set((state) => ({ 
     lampOn: !state.lampOn 
   })),
