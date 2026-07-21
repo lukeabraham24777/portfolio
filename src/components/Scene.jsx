@@ -2096,7 +2096,10 @@ useEffect(() => {
       <BasketballMesh meshRef={basketballRef} />
       <ConfettiEmitter active={confettiActive} />
 
-      <EffectComposer>
+      {/* multisampling default is 8; the post HDR target's memory scales with
+          sample count. Bloom already softens edges, so 4x is ~indistinguishable
+          while roughly halving that buffer. Drop to 2 (or 0) for more savings. */}
+      <EffectComposer multisampling={4}>
         <Bloom intensity={1.5} luminanceThreshold={0.8} />
         <Vignette eskil={false} offset={0.7} darkness={0.6} />
       </EffectComposer>
