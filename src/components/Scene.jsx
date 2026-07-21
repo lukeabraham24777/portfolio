@@ -1394,6 +1394,37 @@ const Snow = ({ count = 10000 }) => {
   });
   return <instancedMesh ref={mesh} args={[null, null, count]}><sphereGeometry args={[0.04, 4, 4]} /><meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={0.8} /></instancedMesh>
 }
+// ─── TEMP DIAGNOSTIC HUD — top-left live stats. Remove when perf is sorted. ──
+const PerfHUD = () => {
+  const { gl } = useThree()
+  const ref = useRef()
+  const acc = useRef({ t: 0, frames: 0 })
+  useFrame((_, delta) => {
+    acc.current.t += delta
+    acc.current.frames++
+    if (acc.current.t >= 0.5 && ref.current) {
+      const fps = Math.round(acc.current.frames / acc.current.t)
+      acc.current.t = 0; acc.current.frames = 0
+      const r = gl.info.render, m = gl.info.memory
+      const heap = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) + ' MB' : 'n/a'
+      ref.current.innerText =
+        `FPS ${fps}\ndraw calls ${r.calls}\ntris ${(r.triangles / 1000).toFixed(0)}k\n` +
+        `geometries ${m.geometries}   textures ${m.textures}\n` +
+        `programs ${gl.info.programs ? gl.info.programs.length : '?'}\nJS heap ${heap}`
+    }
+  })
+  return (
+    <Html fullscreen style={{ pointerEvents: 'none' }}>
+      <pre ref={ref} style={{
+        position: 'fixed', top: '8px', left: '8px', margin: 0, padding: '8px 11px',
+        background: 'rgba(0,0,0,0.72)', color: '#31ff8f', font: '12px/1.45 monospace',
+        borderRadius: '6px', zIndex: 99999, whiteSpace: 'pre', pointerEvents: 'none',
+      }}>FPS …</pre>
+    </Html>
+  )
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 // Reusable scratch objects for the render loop — avoids allocating fresh
 // Vector3 / Object3D every frame (less GC churn, zero visual change).
 const _dir = new THREE.Vector3()
@@ -1597,6 +1628,17 @@ export const Scene = () => {
     lightTarget.position.set(0, 0, -2)
     scene.add(lightTarget)
   }, [camera, scene, lightTarget])
+
+  // Collect the ~handful of interactive objects once, so the per-frame crosshair
+  // raycast tests only those instead of the ENTIRE scene graph (which includes the
+  // 10k-instance snow mesh + 20k stars — ~30k ray tests/frame that murder fps on
+  // weaker machines). Recollected if the scene structure changes.
+  const interactiveObjsRef = useRef([])
+  useEffect(() => {
+    const list = []
+    scene.traverse((o) => { if (o.userData && o.userData.interactive) list.push(o) })
+    interactiveObjsRef.current = list
+  }, [scene, catPosition, pcOn, lampOn, view])
 
   useEffect(() => {
 const handleKeyDown = (e) => {
@@ -1889,7 +1931,8 @@ useEffect(() => {
     }
 
     raycaster.setFromCamera({ x: 0, y: 0 }, camera)
-    const intersects = raycaster.intersectObjects(scene.children, true)
+    const rayTargets = interactiveObjsRef.current.length ? interactiveObjsRef.current : scene.children
+    const intersects = raycaster.intersectObjects(rayTargets, true)
     const hit = intersects.find(i => i.object.userData.interactive || i.object.parent?.userData.interactive)
     const type = hit?.object.userData.type || hit?.object.parent?.userData.type
     setLookingAt(type)
@@ -1953,6 +1996,7 @@ useEffect(() => {
 
   return (
     <>
+      <PerfHUD />
       {!isSitting && <PointerLockControls />}
 
       <Snow />
