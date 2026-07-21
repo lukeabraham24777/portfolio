@@ -1394,32 +1394,62 @@ const Snow = ({ count = 10000 }) => {
   });
   return <instancedMesh ref={mesh} args={[null, null, count]}><sphereGeometry args={[0.04, 4, 4]} /><meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={0.8} /></instancedMesh>
 }
-// ─── TEMP DIAGNOSTIC HUD — top-left live stats. Remove when perf is sorted. ──
+// ─── PERFORMANCE HUD — purple "advanced details" toggle + live stats panel ───
 const PerfHUD = () => {
   const { gl } = useThree()
   const ref = useRef()
   const acc = useRef({ t: 0, frames: 0 })
+  const [show, setShow] = useState(true) // details visible by default; toggle to hide
+
   useFrame((_, delta) => {
     acc.current.t += delta
     acc.current.frames++
-    if (acc.current.t >= 0.5 && ref.current) {
+    if (acc.current.t >= 0.5) {
       const fps = Math.round(acc.current.frames / acc.current.t)
       acc.current.t = 0; acc.current.frames = 0
-      const r = gl.info.render, m = gl.info.memory
-      const heap = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) + ' MB' : 'n/a'
-      ref.current.innerText =
-        `FPS ${fps}\ndraw calls ${r.calls}\ntris ${(r.triangles / 1000).toFixed(0)}k\n` +
-        `geometries ${m.geometries}   textures ${m.textures}\n` +
-        `programs ${gl.info.programs ? gl.info.programs.length : '?'}\nJS heap ${heap}`
+      if (ref.current) {
+        const r = gl.info.render, m = gl.info.memory
+        const heap = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) + ' MB' : 'n/a'
+        ref.current.innerText =
+          `FPS ${fps}\ndraw calls ${r.calls}\ntris ${(r.triangles / 1000).toFixed(0)}k\n` +
+          `geometries ${m.geometries}   textures ${m.textures}\n` +
+          `programs ${gl.info.programs ? gl.info.programs.length : '?'}\nJS heap ${heap}`
+      }
     }
   })
+
   return (
     <Html fullscreen style={{ pointerEvents: 'none' }}>
-      <pre ref={ref} style={{
-        position: 'fixed', top: '8px', left: '8px', margin: 0, padding: '8px 11px',
-        background: 'rgba(0,0,0,0.72)', color: '#31ff8f', font: '12px/1.45 monospace',
-        borderRadius: '6px', zIndex: 99999, whiteSpace: 'pre', pointerEvents: 'none',
-      }}>FPS …</pre>
+      <div style={{
+        position: 'fixed', top: '8px', left: '8px',
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '6px',
+        zIndex: 99999,
+      }}>
+        {/* Stats panel — appears ABOVE the toggle button */}
+        {show && (
+          <pre ref={ref} style={{
+            margin: 0, padding: '8px 11px',
+            background: 'rgba(0,0,0,0.72)', color: '#31ff8f', font: '12px/1.45 monospace',
+            borderRadius: '6px', whiteSpace: 'pre', pointerEvents: 'none',
+          }}>FPS …</pre>
+        )}
+
+        {/* Purple neon toggle button (top-left) */}
+        <button
+          onClick={() => setShow((s) => !s)}
+          style={{
+            pointerEvents: 'auto', cursor: 'pointer',
+            fontFamily: "'Courier New', monospace", fontSize: '11px', letterSpacing: '1.5px',
+            color: '#a855f7', textShadow: '0 0 10px #a855f7',
+            background: 'rgba(5, 5, 5, 0.80)',
+            border: '1px solid rgba(168, 85, 247, 0.55)',
+            boxShadow: '0 0 14px rgba(168, 85, 247, 0.25), inset 0 0 12px rgba(168, 85, 247, 0.06)',
+            backdropFilter: 'blur(4px)', borderRadius: '4px', padding: '6px 10px',
+          }}
+        >
+          {show ? '▾' : '▸'} ADVANCED DETAILS
+        </button>
+      </div>
     </Html>
   )
 }
