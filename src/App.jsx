@@ -190,7 +190,10 @@ function App() {
   return (
     <div style={{ width: '100vw', height: '100vh', cursor: 'auto' }}>
       <WakeUpOverlay onComplete={handleWakeUpComplete} />
-      <Canvas>
+      {/* Cap pixel ratio at 2: identical on standard/retina (≤2x) displays, but
+          prevents 3x–4x phones / high-DPI Windows scaling from allocating giant
+          render buffers (buffer memory grows with the square of the ratio). */}
+      <Canvas dpr={[1, 2]}>
         <Scene />
       </Canvas>
       <Overlay />
