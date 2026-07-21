@@ -1391,6 +1391,13 @@ const Snow = ({ count = 10000 }) => {
   });
   return <instancedMesh ref={mesh} args={[null, null, count]}><sphereGeometry args={[0.04, 4, 4]} /><meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={0.8} /></instancedMesh>
 }
+// Reusable scratch objects for the render loop — avoids allocating fresh
+// Vector3 / Object3D every frame (less GC churn, zero visual change).
+const _dir = new THREE.Vector3()
+const _front = new THREE.Vector3()
+const _side = new THREE.Vector3()
+const _dummy = new THREE.Object3D()
+
 export const Scene = () => {
   const { lampOn, toggleLamp, catPosition, moveCat, sitDown, view, standUp, pcOn, togglePc } = useStore()
   const isSitting = view === 'room'
@@ -1776,7 +1783,7 @@ useEffect(() => {
         state.camera.position.lerp(sitPos, fpsSlerpFactor(0.03, delta))
       }
 
-      const dummy = new THREE.Object3D()
+      const dummy = _dummy
       dummy.position.copy(state.camera.position)
       dummy.lookAt(deskLookAt)
 
@@ -1786,9 +1793,9 @@ useEffect(() => {
       const dt = Math.min(delta, MAX_DELTA)
       // Distance travelled this frame = speed(units/sec) × seconds elapsed → frame-rate independent
       const velocity = MOVE_SPEED * dt
-      const direction = new THREE.Vector3()
-      const frontVector = new THREE.Vector3(0, 0, Number(movement.backward) - Number(movement.forward))
-      const sideVector = new THREE.Vector3(Number(movement.left) - Number(movement.right), 0, 0)
+      const direction = _dir
+      const frontVector = _front.set(0, 0, Number(movement.backward) - Number(movement.forward))
+      const sideVector = _side.set(Number(movement.left) - Number(movement.right), 0, 0)
       direction.subVectors(frontVector, sideVector).normalize().multiplyScalar(velocity).applyEuler(state.camera.rotation)
       state.camera.position.x = Math.max(-55, Math.min(55, state.camera.position.x + direction.x))
       state.camera.position.z = Math.max(-55, Math.min(55, state.camera.position.z + direction.z))
