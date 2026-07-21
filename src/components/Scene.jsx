@@ -28,7 +28,10 @@ const VOLUMES = {
 // number to make the whole thing faster/slower.
 const BASELINE_FPS = 144      // the experience is locked to feel like it did at this refresh rate
 const MOVE_SPEED = 0.1 * BASELINE_FPS   // 16.5 units/sec (old code moved 0.1 units PER FRAME)
-const MAX_DELTA  = 1 / 15     // clamp a single frame's delta so a stutter/tab-out can't teleport things
+const MAX_DELTA  = 1 / 8      // clamp a single frame's delta so a stutter/tab-out can't teleport things.
+                             // Below ~8 fps the scene runs in slow motion (the clamp trades speed for
+                             // not leaping across the map on a freeze). Raise the denominator to slow-mo
+                             // sooner, lower it to tolerate worse frame rates before slowing.
 // Reproduces a fixed-alpha lerp that was tuned at BASELINE_FPS, at ANY frame rate.
 // `alpha` is the old per-frame lerp factor; `delta` is seconds since last frame.
 const fpsLerp = (current, target, alpha, delta) =>
@@ -2099,7 +2102,7 @@ useEffect(() => {
       {/* multisampling default is 8; the post HDR target's memory scales with
           sample count. Bloom already softens edges, so 4x is ~indistinguishable
           while roughly halving that buffer. Drop to 2 (or 0) for more savings. */}
-      <EffectComposer multisampling={4}>
+      <EffectComposer multisampling={0}>
         <Bloom intensity={1.5} luminanceThreshold={0.8} />
         <Vignette eskil={false} offset={0.7} darkness={0.6} />
       </EffectComposer>
