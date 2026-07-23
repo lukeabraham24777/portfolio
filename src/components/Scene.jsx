@@ -55,10 +55,10 @@ const PROJECTS = [
     link: 'https://github.com/lukeabraham',
   },
   {
-    title: 'Project Two',
-    blurb: 'Short description of what this project is and what makes it interesting. Replace this placeholder with your real work.',
+    title: 'CmdTab',
+    blurb: 'Open-source macOS app to enable users to contri.',
     tech: ['Tech', 'Stack', 'Here'],
-    link: 'https://github.com/lukeabraham',
+    link: 'https://cmd-tab.com',
   },
   {
     title: 'Project Three',
@@ -70,9 +70,9 @@ const PROJECTS = [
 
 // Fill in your real handles / URLs. Email is prefilled; edit as needed.
 const CONTACT = {
-  github:   { url: 'https://github.com/lukeabraham',            handle: 'github.com/lukeabraham' },
-  linkedin: { url: 'https://www.linkedin.com/in/lukeabraham',   handle: 'in/lukeabraham' },
-  email:    { url: 'mailto:lukeabraham06@gmail.com',            handle: 'lukeabraham06@gmail.com' },
+  github:   { url: 'https://github.com/lukeabraham24777',     handle: 'lukeabraham24777' },
+  linkedin: { url: 'https://www.linkedin.com/in/lukeabrm/',   handle: 'in/lukeabrm' },
+  email:    { url: 'mailto:lukeabraham06@gmail.com',          handle: 'lukeabraham06@gmail.com' },
 }
 
 const RESUME_URL = '/resume.pdf'
