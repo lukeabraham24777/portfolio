@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useMemo } from 'react'
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Stars, PointerLockControls, Float, Sky, Html } from '@react-three/drei'
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
@@ -28,6 +28,15 @@ const VOLUMES = {
 // number to make the whole thing faster/slower.
 const BASELINE_FPS = 144      // the experience is locked to feel like it did at this refresh rate
 const MOVE_SPEED = 0.1 * BASELINE_FPS   // 16.5 units/sec (old code moved 0.1 units PER FRAME)
+const SPRINT_MULTIPLIER = 1.8 // walk speed × this while Shift is held
+// ─── STAGE SCALE — compresses the whole layout toward the origin ──────────
+// Every placed object's x/z position is multiplied by this, so the arrangement
+// keeps its exact relative proportions but everything sits closer together.
+// Object SIZES are untouched. The walkable boundary, border strips, floor and
+// spawn point follow it. 1.0 = the original spread.
+const STAGE_SCALE = 0.8
+const STAGE_BOUND = 55 * STAGE_SCALE // player/ball clamp (was ±55)
+
 const MAX_DELTA  = 1 / 8      // clamp a single frame's delta so a stutter/tab-out can't teleport things.
                              // Below ~8 fps the scene runs in slow motion (the clamp trades speed for
                              // not leaping across the map on a freeze). Raise the denominator to slow-mo
@@ -46,25 +55,44 @@ const PROMPT_TOP_PX = 80  // pixels from the top of the viewport
 
 // ─── IN-COMPUTER OS CONTENT — everything the virtual desktop shows ─────────
 // PROJECTS is fully modular: add / remove / reorder objects here and the
-// Projects.exe window rebuilds itself automatically. `link` opens in a new tab.
+// Projects.exe window rebuilds itself automatically. `link` opens in a new tab
+// (the repo's homepage where one exists, else the GitHub repo); `repo` powers
+// the GitHub icon in each card's bottom-right corner.
 const PROJECTS = [
+  {
+    title: 'CmdTab',
+    blurb: 'Low-latency macOS window manager that unifies MRU tab, window, and application switching with window previews, on-click minimization, mic controls, and low-level system integrations unavailable natively on macOS. 25+ downloads',
+    tech: ['Swift', 'JavaScript', 'Python', 'Shell'],
+    link: 'https://cmd-tab.com',
+    repo: 'https://github.com/lukeabraham24777/CmdTab',
+  },
+  {
+    title: 'Inspector Pipe',
+    blurb: 'Predictive data realignment via anomaly detection — full dashboard, mapped pipe anomalies, and anomaly forecasting for pipeline engineers. Saves pipeline companies millions of dollars and engineers hundreds of hours.',
+    tech: ['Python', 'JavaScript', 'HTML', 'CSS'],
+    link: 'https://inspector-pipe.vercel.app',
+    repo: 'https://github.com/lukeabraham24777/inspector-pipe',
+  },
+  {
+    title: 'Market-Making Trading Bot',
+    blurb: 'IMC Prosperity 4 finalist trading bot; yielded ~$33,000 profit.',
+    tech: ['Python'],
+    link: 'https://github.com/lukeabraham24777/Market-Making-Trading-Bot',
+    repo: 'https://github.com/lukeabraham24777/Market-Making-Trading-Bot',
+  },
+  {
+    title: 'Death Clock',
+    blurb: 'Recreation of www.death-clock.ai.',
+    tech: ['TypeScript', 'JavaScript', 'Python', 'Docker'],
+    link: 'https://www.youtube.com/shorts/DtgI_douClg',
+    repo: 'https://github.com/lukeabraham24777/death-clock',
+  },
   {
     title: 'Cottage Portfolio',
     blurb: 'This very world — an explorable 3D winter cabin with custom GLSL auroras, spatial audio, and a playable basketball mini-game.',
     tech: ['React', 'Three.js', 'R3F', 'GLSL'],
-    link: 'https://github.com/lukeabraham',
-  },
-  {
-    title: 'CmdTab',
-    blurb: 'Open-source macOS app to enable users to contri.',
-    tech: ['Tech', 'Stack', 'Here'],
-    link: 'https://cmd-tab.com',
-  },
-  {
-    title: 'Project Three',
-    blurb: 'Another placeholder. Duplicate one of these objects to add as many projects as you like — the grid scrolls.',
-    tech: ['Node', 'API'],
-    link: 'https://github.com/lukeabraham',
+    link: 'https://www.luke-abraham.com/',
+    repo: 'https://github.com/lukeabraham24777/portfolio',
   },
 ]
 
@@ -82,8 +110,8 @@ const RESUME_URL = '/resume.pdf'
 const SHOT_METER_SPEED = 0.55    // full swings per second (higher = faster bar)
 const SHOT_GOOD_ZONE   = 0.14   // fraction below 1.0 that counts as a good shot
 const BALL_HOLD_DISTANCE = 2.4  // units in front of camera the ball floats
-const BALL_SPAWN = [40, 0.55, -40] // where the ball rests when not held
-const HOOP_POS = [52, 13, -52]    // position of the hoop group
+const BALL_SPAWN = [40 * STAGE_SCALE, 0.55, -40 * STAGE_SCALE] // where the ball rests when not held
+const HOOP_POS = [52 * STAGE_SCALE, 13, -52 * STAGE_SCALE]    // position of the hoop group
 const HOOP_ROT_Y = Math.PI * 0.75 // hoop group Y rotation (faces scene center)
 // World-space rim centre — local rim offset [0, -0.98, -0.9] rotated by HOOP_ROT_Y.
 // R_y(θ): worldX = groupX + lz*sin(θ),  worldZ = groupZ + lz*cos(θ)  (lx=0)
@@ -96,6 +124,170 @@ const HOOP_RIM_WORLD = new THREE.Vector3(
   HOOP_POS[2] + (-0.9) * Math.cos(HOOP_ROT_Y)
 )
 const FLIGHT_DURATION = 1.3 // seconds for ball arc
+// ────────────────────────────────────────────────────────────────────────────
+
+// ─── GRAND PIANO CONSTANTS — corner prop, scale ≈ 2 units/meter ──────────
+const PIANO_POS = [-49 * STAGE_SCALE, 0, -49 * STAGE_SCALE]
+const PIANO_ROT_Y = Math.PI / 4 // 45° — tail into the (-60,-60) corner, keyboard/open lid facing room center
+const PIANO_LIGHT_RADIUS = 14 // xz-plane distance (units) from PIANO_POS at which the overhead spotlight switches on
+const PIANO_SCALE = 1.8 // 80% larger, uniform (proportions unchanged)
+
+const LENGTH_TOTAL   = 3.70  // spine-to-tail (real ≈ 1.85m)
+const WIDTH_MAX       = 3.06  // max bentside width (real ≈ 1.53m)
+const KEYBOARD_WIDTH  = 2.44  // 88-key span (real ≈ 1.22m)
+const LEG_HEIGHT      = 1.36  // floor → keybed
+const CASE_RIM_HEIGHT = 0.60  // keybed → case top
+const CASE_TOP_Y      = LEG_HEIGHT + CASE_RIM_HEIGHT
+const WHITE_KEY_LEN   = 0.30
+const BLACK_KEY_LEN   = 0.19
+const LID_THICKNESS   = 0.08
+const LID_OPEN_DEG    = 52
+
+// shape-space corners (x = width axis, y = length axis; y=0 front/keyboard, y=LENGTH_TOTAL tail)
+const BASS_X   = -1.32
+const TREBLE_X = 1.32
+const MAX_X    = 1.74 // BASS_X + WIDTH_MAX
+const MAX_Y    = 1.15
+const TAIL_X   = -1.05
+const CHEEK_WIDTH = 0.15      // solid corner block flanking the keyboard on each side
+const KEY_NOTCH_DEPTH = 0.55  // how far back the keyboard cutout recesses between the cheek blocks
+
+// top-down wing-shaped outline: straight spine, curved bentside/tail, and a rectangular notch
+// recessed between two solid "cheek block" corners where the keyboard sits — without this notch
+// the case would be a solid slab in front of the keys, hiding them entirely.
+// xShift lets the lid reuse the same outline shifted so the hinge (spine) edge sits at shape-x=0.
+function buildWingShape(xShift = 0) {
+  const s = new THREE.Shape()
+  const X = (v) => v + xShift
+  s.moveTo(X(BASS_X), 0)
+  s.lineTo(X(BASS_X + CHEEK_WIDTH), 0)
+  s.lineTo(X(BASS_X + CHEEK_WIDTH), KEY_NOTCH_DEPTH)
+  s.lineTo(X(TREBLE_X - CHEEK_WIDTH), KEY_NOTCH_DEPTH)
+  s.lineTo(X(TREBLE_X - CHEEK_WIDTH), 0)
+  s.lineTo(X(TREBLE_X), 0)
+  s.quadraticCurveTo(X(1.95), 0.50, X(MAX_X), MAX_Y)
+  s.quadraticCurveTo(X(1.55), 2.60, X(0.05), 3.55)
+  s.quadraticCurveTo(X(-0.55), 3.75, X(TAIL_X), LENGTH_TOTAL)
+  s.lineTo(X(BASS_X), 0)
+  s.closePath()
+  return s
+}
+
+// standard 12-semitone octave: C C# D D# E F F# G G# A A# B — no black key between E-F or B-C
+const OCTAVE_PATTERN = [
+  { black: false }, { black: true }, { black: false }, { black: true }, { black: false },
+  { black: false }, { black: true }, { black: false }, { black: true }, { black: false }, { black: true }, { black: false },
+]
+const PIANO_KEY_SEQUENCE = [
+  ...OCTAVE_PATTERN.slice(9),                // A0 A#0 B0 (pickup)
+  ...Array(7).fill(OCTAVE_PATTERN).flat(),   // C1..B7
+  ...OCTAVE_PATTERN.slice(0, 1),              // C8
+] // 88 keys: 52 white + 36 black
+const PIANO_WHITE_COUNT = 52
+const PIANO_WHITE_PITCH = KEYBOARD_WIDTH / PIANO_WHITE_COUNT
+const PIANO_KB_HALF = KEYBOARD_WIDTH / 2
+
+// ─── PIANO SOUND ENGINE — Web Audio additive synth, zero audio assets ─────
+// Each strike = 5 slightly-inharmonic sine partials through a closing lowpass
+// (bright hammer attack that mellows), with bass strings ringing far longer
+// than treble, exactly like real strings. noteOff = the damper felt: a fast
+// fade instead of a hard cut. Holding a key sustains its natural decay;
+// re-striking layers a fresh strike over the old one's tail.
+const PIANO_PARTIALS = [
+  { mult: 1, gain: 1.0 },
+  { mult: 2, gain: 0.55 },
+  { mult: 3, gain: 0.3 },
+  { mult: 4, gain: 0.16 },
+  { mult: 5, gain: 0.08 },
+]
+let _pianoCtx = null
+let _pianoBus = null
+const getPianoCtx = () => {
+  if (!_pianoCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    _pianoCtx = new AC()
+    // soft-knee compressor so full-arm chords/glissandi don't clip
+    const comp = _pianoCtx.createDynamicsCompressor()
+    comp.threshold.value = -18
+    comp.knee.value = 20
+    comp.ratio.value = 6
+    _pianoBus = _pianoCtx.createGain()
+    _pianoBus.gain.value = 0.9
+    _pianoBus.connect(comp)
+    comp.connect(_pianoCtx.destination)
+  }
+  if (_pianoCtx.state === 'suspended') _pianoCtx.resume()
+  return _pianoCtx
+}
+const midiToFreq = (m) => 440 * Math.pow(2, (m - 69) / 12)
+
+const pianoNoteOn = (midi) => {
+  const ctx = getPianoCtx()
+  if (!ctx) return null
+  const t = ctx.currentTime
+  const f0 = midiToFreq(midi)
+  const ring = 6.5 * Math.pow(0.5, (midi - 21) / 24) + 0.4 // A0 ≈ 7s → C8 ≈ 0.5s
+
+  const strike = ctx.createGain()
+  const peak = 0.22 * Math.pow(0.85, Math.max(0, (midi - 60) / 12)) // taper the shrill top octaves
+  strike.gain.setValueAtTime(0, t)
+  strike.gain.linearRampToValueAtTime(peak, t + 0.004)
+  strike.gain.setTargetAtTime(0, t + 0.004, ring / 3)
+
+  const hammer = ctx.createBiquadFilter()
+  hammer.type = 'lowpass'
+  hammer.Q.value = 0.3
+  hammer.frequency.setValueAtTime(Math.min(f0 * 9, 11000), t)
+  hammer.frequency.exponentialRampToValueAtTime(Math.max(f0 * 2, 600), t + Math.min(ring, 1.4))
+
+  strike.connect(hammer)
+  hammer.connect(_pianoBus)
+
+  const stopAt = t + ring * 2.5 + 0.5
+  const oscs = PIANO_PARTIALS.map((p) => {
+    const o = ctx.createOscillator()
+    o.type = 'sine'
+    o.frequency.value = f0 * p.mult * (1 + 0.0002 * p.mult * p.mult) // string stiffness stretch
+    const g = ctx.createGain()
+    g.gain.value = p.gain
+    o.connect(g)
+    g.connect(strike)
+    o.start(t)
+    o.stop(stopAt)
+    return o
+  })
+  oscs[0].onended = () => { strike.disconnect(); hammer.disconnect() }
+  return { strike, oscs, dead: false }
+}
+
+const pianoNoteOff = (h) => {
+  if (!h || h.dead || !_pianoCtx) return
+  h.dead = true
+  const t = _pianoCtx.currentTime
+  h.strike.gain.cancelScheduledValues(t)
+  h.strike.gain.setTargetAtTime(0, t, 0.1) // damper felt, not a hard cut
+  h.oscs.forEach((o) => { try { o.stop(t + 0.6) } catch { /* already stopped */ } })
+}
+
+// ─── PIANO BENCH — sittable, positioned in front of the keyboard ──────────
+const BENCH_LENGTH = 1.9   // long axis, parallel to the keyboard (real ≈ 0.95m)
+const BENCH_DEPTH = 0.7
+const BENCH_LEG_HEIGHT = 1.0
+const BENCH_SEAT_THICK = 0.16
+const BENCH_LOCAL_OFFSET = 1.3 // unscaled distance in front of the keyboard (before PIANO_SCALE)
+const BENCH_POS = [
+  PIANO_POS[0] + BENCH_LOCAL_OFFSET * PIANO_SCALE * Math.sin(PIANO_ROT_Y),
+  0,
+  PIANO_POS[2] + BENCH_LOCAL_OFFSET * PIANO_SCALE * Math.cos(PIANO_ROT_Y),
+]
+// Camera target while sitting: eye height matches the desk chair's sit height; look toward the keyboard.
+const PIANO_BENCH_SIT_POS = new THREE.Vector3(BENCH_POS[0], 3.8, BENCH_POS[2])
+const PIANO_KEYBOARD_GAZE = new THREE.Vector3(PIANO_POS[0], 2.4, PIANO_POS[2]) // where the player should actually appear to look
+// THREE.Object3D.lookAt() (unlike Camera.lookAt) orients -Z AWAY from its target — the same reason
+// the desk's own `deskLookAt` sits on the far side of `sitPos` from the monitor. Mirror the real
+// gaze point through the sit position so the reversal cancels out and the camera faces the piano.
+const PIANO_BENCH_LOOK_AT = PIANO_BENCH_SIT_POS.clone().multiplyScalar(2).sub(PIANO_KEYBOARD_GAZE)
 // ────────────────────────────────────────────────────────────────────────────
 
 // ─── TypedText: letter-by-letter typing animation ────────────────────────
@@ -935,6 +1127,172 @@ const HoopWithThrusters = () => {
   )
 }
 
+// ─── PIANO KEY — clickable, drag-playable, only while seated at the bench ──
+// Raycasting is swapped out entirely when not playable so 88 extra meshes cost
+// the pointer-event system nothing during normal walking around.
+const MESH_RAYCAST = THREE.Mesh.prototype.raycast
+const NULL_RAYCAST = () => null
+const PianoKey = ({ x, black, midi, playable, onKeyPlayed }) => {
+  const ref = useRef()
+  const noteRef = useRef(null)
+  const baseY = LEG_HEIGHT + (black ? 0.065 : 0.025)
+
+  const press = () => {
+    if (noteRef.current) return
+    noteRef.current = pianoNoteOn(midi)
+    onKeyPlayed?.()
+    if (ref.current) ref.current.position.y = baseY - (black ? 0.028 : 0.02)
+  }
+  const release = () => {
+    if (!noteRef.current) return
+    pianoNoteOff(noteRef.current)
+    noteRef.current = null
+    if (ref.current) ref.current.position.y = baseY
+  }
+
+  // Standing up mid-note: damp it and reset the key
+  useEffect(() => { if (!playable) release() }, [playable])
+
+  return (
+    <mesh
+      ref={ref}
+      position={[x, baseY, black ? -0.205 : -0.15]}
+      castShadow
+      receiveShadow={!black}
+      raycast={playable ? MESH_RAYCAST : NULL_RAYCAST}
+      onPointerDown={(e) => { e.stopPropagation(); press() }}
+      onPointerOver={(e) => { e.stopPropagation(); if (e.buttons & 1) press(); document.body.style.cursor = 'pointer' }}
+      onPointerUp={() => release()}
+      onPointerOut={() => { release(); document.body.style.cursor = 'auto' }}
+    >
+      {black
+        ? <boxGeometry args={[0.023, 0.07, BLACK_KEY_LEN]} />
+        : <boxGeometry args={[PIANO_WHITE_PITCH * 0.92, 0.05, WHITE_KEY_LEN]} />}
+      <meshStandardMaterial color={black ? '#0d0d0d' : '#f5f0e6'} roughness={black ? 0.4 : 0.5} />
+    </mesh>
+  )
+}
+
+// ─── GRAND PIANO — corner decoration, tail nestled into the (-60,-60) corner ─
+const GrandPiano = ({ playable, onKeyPlayed }) => {
+  const caseGeo = useMemo(() => new THREE.ExtrudeGeometry(buildWingShape(0), {
+    depth: CASE_RIM_HEIGHT,
+    bevelEnabled: true, bevelThickness: 0.025, bevelSize: 0.025, bevelSegments: 2,
+    steps: 1, curveSegments: 24,
+  }), [])
+
+  const lidGeo = useMemo(() => new THREE.ExtrudeGeometry(buildWingShape(-BASS_X), {
+    depth: LID_THICKNESS,
+    bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 1,
+    steps: 1, curveSegments: 24,
+  }), [])
+
+  const legs = [
+    [-1.15, -0.35], // front-left (bass)
+    [1.15, -0.35],  // front-right (treble)
+    [0.30, -2.70],  // back, under the belly
+  ]
+
+  const keys = useMemo(() => (
+    PIANO_KEY_SEQUENCE.map((k, i) => {
+      const whiteIndex = PIANO_KEY_SEQUENCE.slice(0, i).filter((kk) => !kk.black).length
+      return k.black
+        ? { x: -PIANO_KB_HALF + PIANO_WHITE_PITCH * whiteIndex, black: true }
+        : { x: -PIANO_KB_HALF + PIANO_WHITE_PITCH * (whiteIndex + 0.5), black: false }
+    })
+  ), [])
+
+  return (
+    <group position={PIANO_POS} rotation={[0, PIANO_ROT_Y, 0]} scale={PIANO_SCALE} userData={{ type: 'piano' }}>
+      {/* case */}
+      <mesh geometry={caseGeo} position={[0, LEG_HEIGHT, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
+        <meshStandardMaterial color="#0a0a0a" roughness={0.42} metalness={0.12} />
+      </mesh>
+
+      {/* lid — hinged along the spine (bass) edge, propped open toward the room */}
+      <group position={[BASS_X, CASE_TOP_Y, 0]} rotation={[0, 0, THREE.MathUtils.degToRad(LID_OPEN_DEG)]}>
+        <mesh geometry={lidGeo} rotation={[-Math.PI / 2, 0, 0]} castShadow>
+          <meshStandardMaterial color="#0a0a0a" roughness={0.4} metalness={0.12} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+
+      {/* legs */}
+      {legs.map(([x, z], i) => (
+        <group key={i} position={[x, 0, z]}>
+          <mesh position={[0, LEG_HEIGHT / 2, 0]} castShadow>
+            <cylinderGeometry args={[0.09, 0.065, LEG_HEIGHT, 8]} />
+            <meshStandardMaterial color="#0a0a0a" roughness={0.45} metalness={0.15} />
+          </mesh>
+          <mesh position={[0, 0.03, 0]}>
+            <sphereGeometry args={[0.06, 8, 6]} />
+            <meshStandardMaterial color="#3a3a3a" metalness={0.5} roughness={0.35} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* keybed — sits in the cheek-block notch, under the keys */}
+      <mesh position={[0, LEG_HEIGHT - 0.05, -KEY_NOTCH_DEPTH / 2]} receiveShadow>
+        <boxGeometry args={[KEYBOARD_WIDTH + 0.1, 0.1, KEY_NOTCH_DEPTH]} />
+        <meshStandardMaterial color="#1a1108" roughness={0.5} />
+      </mesh>
+
+      {/* keyboard — 88 real keys, A0 (midi 21) through C8 (midi 108) */}
+      {keys.map((k, i) => (
+        <PianoKey key={i} x={k.x} black={k.black} midi={21 + i} playable={playable} onKeyPlayed={onKeyPlayed} />
+      ))}
+
+      {/* music desk */}
+      <group position={[0, LEG_HEIGHT + 0.35, -0.55]} rotation={[-0.35, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[2.0, 0.5, 0.04]} />
+          <meshStandardMaterial color="#0a0a0a" roughness={0.3} />
+        </mesh>
+      </group>
+      <mesh position={[0, LEG_HEIGHT + 0.12, -0.42]}>
+        <cylinderGeometry args={[0.02, 0.02, 0.25, 6]} />
+        <meshStandardMaterial color="#2a2a2a" metalness={0.6} roughness={0.3} />
+      </mesh>
+    </group>
+  )
+}
+
+// ─── PIANO BENCH — sittable, matches the Chair's hover-glow pattern ───────
+const PianoBench = ({ isHovered }) => {
+  const groupRef = useRef()
+  const scaleRef = useRef(1)
+  const seatMatRef = useRef()
+
+  useFrame((_, delta) => {
+    const target = isHovered ? 1.07 : 1.0
+    scaleRef.current = fpsLerp(scaleRef.current, target, 0.1, delta)
+    if (groupRef.current) groupRef.current.scale.setScalar(scaleRef.current * PIANO_SCALE)
+    const emTarget = isHovered ? 0.35 : 0.0
+    if (seatMatRef.current) seatMatRef.current.emissiveIntensity = fpsLerp(seatMatRef.current.emissiveIntensity, emTarget, 0.1, delta)
+  })
+
+  const legs = [
+    [-(BENCH_LENGTH / 2 - 0.15), BENCH_LEG_HEIGHT / 2, -(BENCH_DEPTH / 2 - 0.1)],
+    [(BENCH_LENGTH / 2 - 0.15), BENCH_LEG_HEIGHT / 2, -(BENCH_DEPTH / 2 - 0.1)],
+    [-(BENCH_LENGTH / 2 - 0.15), BENCH_LEG_HEIGHT / 2, (BENCH_DEPTH / 2 - 0.1)],
+    [(BENCH_LENGTH / 2 - 0.15), BENCH_LEG_HEIGHT / 2, (BENCH_DEPTH / 2 - 0.1)],
+  ]
+
+  return (
+    <group ref={groupRef} position={BENCH_POS} rotation={[0, PIANO_ROT_Y, 0]} userData={{ interactive: true, type: 'pianoBench' }}>
+      <mesh position={[0, BENCH_LEG_HEIGHT + BENCH_SEAT_THICK / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[BENCH_LENGTH, BENCH_SEAT_THICK, BENCH_DEPTH]} />
+        <meshStandardMaterial ref={seatMatRef} color="#3d260b" emissive="#7a5320" emissiveIntensity={0} />
+      </mesh>
+      {legs.map((p, i) => (
+        <mesh key={i} position={p}>
+          <boxGeometry args={[0.12, BENCH_LEG_HEIGHT, 0.12]} />
+          <meshStandardMaterial color="#1a1105" />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
 // ─── BASKETBALL ───────────────────────────────────────────────────────────
 const BasketballMesh = ({ meshRef }) => (
   <group ref={meshRef} position={BALL_SPAWN} userData={{ interactive: true, type: 'basketball' }}>
@@ -1075,11 +1433,13 @@ const WindowChrome = ({ title, accent, onBack, right, children }) => {
 // ── PROJECTS.EXE — rebuilds from the PROJECTS array (fully modular) ──
 const ProjectCard = ({ p }) => {
   const [h, setH] = useState(false)
+  const [ghHover, setGhHover] = useState(false)
   return (
     <div
       onMouseEnter={() => setH(true)}
       onMouseLeave={() => setH(false)}
       style={{
+        position: 'relative',
         border: `1px solid ${h ? 'rgba(56,189,248,0.6)' : 'rgba(56,189,248,0.22)'}`,
         borderRadius: '8px', padding: '14px 16px',
         background: h ? 'rgba(56,189,248,0.06)' : 'rgba(56,189,248,0.02)',
@@ -1093,11 +1453,24 @@ const ProjectCard = ({ p }) => {
         )}
       </div>
       <p style={{ margin: '8px 0 10px', fontSize: '12px', lineHeight: 1.5, color: '#cbd5e1' }}>{p.blurb}</p>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', paddingRight: '28px' }}>
         {p.tech.map(t => (
           <span key={t} style={{ fontSize: '10px', color: '#94a3b8', border: '1px solid #334155', borderRadius: '4px', padding: '2px 7px' }}>{t}</span>
         ))}
       </div>
+      {p.repo && (
+        <a
+          href={p.repo} target="_blank" rel="noreferrer" title="View source on GitHub"
+          onMouseEnter={() => setGhHover(true)}
+          onMouseLeave={() => setGhHover(false)}
+          style={{
+            position: 'absolute', bottom: '10px', right: '12px', display: 'flex',
+            color: ghHover ? '#e2e8f0' : '#64748b', transition: 'color 0.2s ease',
+          }}
+        >
+          <GithubIcon width={18} height={18} />
+        </a>
+      )}
     </div>
   )
 }
@@ -1435,14 +1808,20 @@ const _side = new THREE.Vector3()
 const _dummy = new THREE.Object3D()
 
 export const Scene = () => {
-  const { lampOn, toggleLamp, catPosition, moveCat, sitDown, view, standUp, pcOn, togglePc } = useStore()
-  const isSitting = view === 'room'
+  const { lampOn, toggleLamp, catPosition, moveCat, sitDown, sitAtPiano, view, standUp, pcOn, togglePc } = useStore()
+  const isSitting = view === 'room' || view === 'piano'
   const { camera, raycaster, scene } = useThree()
   const [lookingAt, setLookingAt] = useState(null)
   const lookingAtRef = useRef(null)
   const [movement, setMovement] = useState({ forward: false, backward: false, left: false, right: false })
+  // Sprint is a ref (not state): read every frame in useFrame, and toggling it
+  // shouldn't re-render or re-bind the key handlers.
+  const sprintRef = useRef(false)
   const spotlightRef = useRef()
   const lightTarget = useMemo(() => new THREE.Object3D(), [])
+  const pianoLightTarget = useMemo(() => new THREE.Object3D(), [])
+  const [pianoLightOn, setPianoLightOn] = useState(false)
+  const pianoLightOnRef = useRef(false)
   const [zoomedIn, setZoomedIn] = useState(false)
   
   // Audio refs for sound effects
@@ -1472,14 +1851,17 @@ export const Scene = () => {
   const proximityPromptRef = useRef(null)
 
   // Track first-interaction per object (for proximity prompts)
-  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false, basketball: false, shot: false, pc: false })
+  const hasInteractedRef = useRef({ lamp: false, cat: false, chair: false, basketball: false, shot: false, pc: false, pianoBench: false, pianoKeys: false })
+
+  // First piano note ever played dismisses the "click the keys" prompt
+  const onPianoKeyPlayed = useCallback(() => { hasInteractedRef.current.pianoKeys = true }, [])
 
   // Snapshot of camera state taken the instant sitDown() fires — used to cancel the sit
   const preSitStateRef = useRef({ x: 0, y: 4, z: 0, rotX: 0, rotY: 0 })
 
   // Precomputed world positions for proximity checks
-  const lampWorldPos = useMemo(() => new THREE.Vector3(-40, 1.5, 50), [])
-  const chairWorldPos = useMemo(() => new THREE.Vector3(0, 0, 4.2), [])
+  const lampWorldPos = useMemo(() => new THREE.Vector3(-40 * STAGE_SCALE, 1.5, 50 * STAGE_SCALE), [])
+  const chairWorldPos = useMemo(() => new THREE.Vector3(0, 0, 4.2 * STAGE_SCALE), [])
 
   // Basketball refs
   const basketballRef = useRef()
@@ -1496,8 +1878,8 @@ export const Scene = () => {
   const [holdingBall, setHoldingBall] = useState(false)
   const [confettiActive, setConfettiActive] = useState(false)
 
-  const sitPos = useMemo(() => new THREE.Vector3(0, 3.8, 3.5), []) 
-  const deskLookAt = useMemo(() => new THREE.Vector3(0, 3.5, 11.5), [])
+  const sitPos = useMemo(() => new THREE.Vector3(0, 3.8, 3.5 * STAGE_SCALE), [])
+  const deskLookAt = useMemo(() => new THREE.Vector3(0, 3.5, 11.5 * STAGE_SCALE), [])
 
   // Helper: fade main music in on first user gesture
   const startMusicWithFade = () => {
@@ -1622,14 +2004,16 @@ export const Scene = () => {
   }, [proximityPrompt])
 
   useEffect(() => {
-    camera.position.set(-55, 4, 55)
+    camera.position.set(-STAGE_BOUND, 4, STAGE_BOUND)
     camera.lookAt(0, 4, 0)
     camera.near = 0.05
     camera.far = 10000
     camera.updateProjectionMatrix()
-    lightTarget.position.set(0, 0, -2)
+    lightTarget.position.set(0, 0, -2 * STAGE_SCALE)
     scene.add(lightTarget)
-  }, [camera, scene, lightTarget])
+    pianoLightTarget.position.set(PIANO_POS[0], 0, PIANO_POS[2])
+    scene.add(pianoLightTarget)
+  }, [camera, scene, lightTarget, pianoLightTarget])
 
   // Collect the ~handful of interactive objects once, so the per-frame crosshair
   // raycast tests only those instead of the ENTIRE scene graph (which includes the
@@ -1646,6 +2030,9 @@ export const Scene = () => {
 const handleKeyDown = (e) => {
   startMusicWithFade()
   const keys = { KeyW: 'forward', KeyS: 'backward', KeyA: 'left', KeyD: 'right' }
+  // The modifier flag is authoritative: true whether Shift was pressed before
+  // or after WASD, false the moment it's released.
+  sprintRef.current = e.shiftKey
 
   // Play keyboard sound if sitting (for ANY key press)
   if (isSitting && keyboardSound.current) {
@@ -1687,6 +2074,7 @@ const handleKeyDown = (e) => {
 
   const handleKeyUp = (e) => {
     const keys = { KeyW: 'forward', KeyS: 'backward', KeyA: 'left', KeyD: 'right' }
+    sprintRef.current = e.shiftKey
     if (keys[e.code]) {
       setMovement((m) => ({ ...m, [keys[e.code]]: false }))
     }
@@ -1769,6 +2157,15 @@ const handleKeyDown = (e) => {
       // Chair clicked but can't sit yet — no sound
       preSitStateRef.current = { x: camera.position.x, y: camera.position.y, z: camera.position.z, rotX: camera.rotation.x, rotY: camera.rotation.y }
       sitDown()
+    } else if (lookingAtRef.current === 'pianoBench') {
+      preSitStateRef.current = { x: camera.position.x, y: camera.position.y, z: camera.position.z, rotX: camera.rotation.x, rotY: camera.rotation.y }
+      sitAtPiano()
+      hasInteractedRef.current.pianoBench = true
+      if (chairSound.current) {
+        const s = chairSound.current.cloneNode()
+        s.volume = VOLUMES.chair
+        s.play().catch(() => {})
+      }
     }
   }
 
@@ -1781,7 +2178,7 @@ const handleKeyDown = (e) => {
     window.removeEventListener('keyup', handleKeyUp)
     window.removeEventListener('mousedown', handleMouseDown)
   }
-}, [lampOn, catPosition, isSitting, toggleLamp, moveCat, sitDown, standUp, camera, togglePc, pcOn])
+}, [lampOn, catPosition, isSitting, toggleLamp, moveCat, sitDown, sitAtPiano, standUp, camera, togglePc, pcOn])
 
 useEffect(() => {
   if (pcOn) {
@@ -1823,29 +2220,35 @@ useEffect(() => {
 
   useFrame((state, delta) => {
     if (isSitting) {
-      if (zoomedIn) {
-        const zoomedPos = new THREE.Vector3(0, 3.5, -1.3)
+      let lookAtTarget
+      if (view === 'piano') {
+        state.camera.position.lerp(PIANO_BENCH_SIT_POS, fpsSlerpFactor(0.03, delta))
+        lookAtTarget = PIANO_BENCH_LOOK_AT
+      } else if (zoomedIn) {
+        const zoomedPos = new THREE.Vector3(0, 3.5, -1.3 * STAGE_SCALE)
         state.camera.position.lerp(zoomedPos, fpsSlerpFactor(0.05, delta))
+        lookAtTarget = deskLookAt
       } else {
         state.camera.position.lerp(sitPos, fpsSlerpFactor(0.03, delta))
+        lookAtTarget = deskLookAt
       }
 
       const dummy = _dummy
       dummy.position.copy(state.camera.position)
-      dummy.lookAt(deskLookAt)
+      dummy.lookAt(lookAtTarget)
 
       state.camera.quaternion.slerp(dummy.quaternion, fpsSlerpFactor(0.03, delta))
       state.camera.updateMatrixWorld()
     } else {
       const dt = Math.min(delta, MAX_DELTA)
       // Distance travelled this frame = speed(units/sec) × seconds elapsed → frame-rate independent
-      const velocity = MOVE_SPEED * dt
+      const velocity = MOVE_SPEED * (sprintRef.current ? SPRINT_MULTIPLIER : 1) * dt
       const direction = _dir
       const frontVector = _front.set(0, 0, Number(movement.backward) - Number(movement.forward))
       const sideVector = _side.set(Number(movement.left) - Number(movement.right), 0, 0)
       direction.subVectors(frontVector, sideVector).normalize().multiplyScalar(velocity).applyEuler(state.camera.rotation)
-      state.camera.position.x = Math.max(-55, Math.min(55, state.camera.position.x + direction.x))
-      state.camera.position.z = Math.max(-55, Math.min(55, state.camera.position.z + direction.z))
+      state.camera.position.x = Math.max(-STAGE_BOUND, Math.min(STAGE_BOUND, state.camera.position.x + direction.x))
+      state.camera.position.z = Math.max(-STAGE_BOUND, Math.min(STAGE_BOUND, state.camera.position.z + direction.z))
 
       // ── BASKETBALL PHYSICS ──────────────────────────────────────────────
       // Ball scale: full size (1.6) on floor, normal size (1.0) when held or in flight
@@ -1861,8 +2264,8 @@ useEffect(() => {
         forward.applyQuaternion(state.camera.quaternion)
         basketballRef.current.position.copy(state.camera.position).add(forward)
         // Clamp to scene bounds even while held
-        basketballRef.current.position.x = Math.max(-55, Math.min(55, basketballRef.current.position.x))
-        basketballRef.current.position.z = Math.max(-55, Math.min(55, basketballRef.current.position.z))
+        basketballRef.current.position.x = Math.max(-STAGE_BOUND, Math.min(STAGE_BOUND, basketballRef.current.position.x))
+        basketballRef.current.position.z = Math.max(-STAGE_BOUND, Math.min(STAGE_BOUND, basketballRef.current.position.z))
       }
 
       // Charging: oscillate charge bar + crouch camera
@@ -1950,10 +2353,23 @@ useEffect(() => {
       lampShadeMatRef.current.emissiveIntensity = fpsLerp(lampShadeMatRef.current.emissiveIntensity, targetIntensity, 0.1, delta)
     }
 
+    // Piano overhead spotlight — xz-plane distance only (per user request, ignore height)
+    const distPianoXZ = Math.hypot(state.camera.position.x - PIANO_POS[0], state.camera.position.z - PIANO_POS[2])
+    const pianoShouldLight = distPianoXZ < PIANO_LIGHT_RADIUS
+    if (pianoShouldLight !== pianoLightOnRef.current) {
+      pianoLightOnRef.current = pianoShouldLight
+      setPianoLightOn(pianoShouldLight)
+      if (lampSound.current) {
+        const s = lampSound.current.cloneNode()
+        s.volume = VOLUMES.lamp
+        s.play().catch(() => {})
+      }
+    }
+
     // Proximity prompts
     if (!isSitting) {
       const camPos = state.camera.position
-      const catPos = catPosition === 'chair' ? new THREE.Vector3(0, 1.8, 4.2) : new THREE.Vector3(7, 0.4, -1)
+      const catPos = catPosition === 'chair' ? new THREE.Vector3(0, 1.8, 4.2 * STAGE_SCALE) : new THREE.Vector3(7 * STAGE_SCALE, 0.4, -1 * STAGE_SCALE)
       const distLamp = camPos.distanceTo(lampWorldPos)
       const distCat = camPos.distanceTo(catPos)
       const distChair = camPos.distanceTo(chairWorldPos)
@@ -1968,6 +2384,8 @@ useEffect(() => {
       if (!hasInteractedRef.current.cat && !lampOn && distCat < 9) prompt = 'Click on the cat!'
       if (!hasInteractedRef.current.chair && catPosition === 'fireplace' && distChair < 9) prompt = 'Click on the chair..'
       if (!hasInteractedRef.current.basketball && distBall < 16) prompt = 'Click on the basketball..'
+      // Piano: the overhead spotlight switching on doubles as the invitation
+      if (!hasInteractedRef.current.pianoBench && pianoShouldLight) prompt = 'Sit at the piano bench..'
       // Override with shot hint when holding (highest priority)
       if (holdingBallRef.current && !hasInteractedRef.current.shot) prompt = 'Hold spacebar to shoot!'
 
@@ -1976,8 +2394,11 @@ useEffect(() => {
         setProximityPrompt(prompt)
       }
     } else {
-      // Sitting: prompt to boot the PC until the player has pressed Space once
-      const prompt = (!pcOn && !hasInteractedRef.current.pc) ? 'Press SPACE to use the computer!' : null
+      // Sitting at the desk: prompt to boot the PC until the player has pressed Space once.
+      // Sitting at the piano: prompt to click the keys until the first note is played.
+      const prompt = (view === 'room' && !pcOn && !hasInteractedRef.current.pc) ? 'Press SPACE to use the computer!'
+        : (view === 'piano' && !hasInteractedRef.current.pianoKeys) ? 'Click the piano keys!'
+        : null
       if (prompt !== proximityPromptRef.current) {
         proximityPromptRef.current = prompt
         setProximityPrompt(prompt)
@@ -1989,11 +2410,13 @@ useEffect(() => {
     lamp: true,
     cat: !lampOn,
     chair: catPosition === 'fireplace',
+    pianoBench: true,
   }
   const isHovered = {
     lamp: lookingAt === 'lamp' && canInteract.lamp,
     cat:  lookingAt === 'cat'  && canInteract.cat,
     chair: lookingAt === 'chair' && canInteract.chair,
+    pianoBench: lookingAt === 'pianoBench' && canInteract.pianoBench,
   }
 
   return (
@@ -2004,7 +2427,7 @@ useEffect(() => {
       <Snow />
       <Aurora />
       <MountainRange />
-      <Fireplace position={[7, 0, -6]} active={!lampOn} />
+      <Fireplace position={[7 * STAGE_SCALE, 0, -6 * STAGE_SCALE]} active={!lampOn} />
 
       <Html calculatePosition={() => [0, 0, 0]} style={{ pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100vw', height: '100vh' }}>
         <style>{`
@@ -2095,7 +2518,7 @@ useEffect(() => {
       {!lampOn && (
         <spotLight
             ref={spotlightRef}
-            position={[0, 25, 12]}
+            position={[0, 25, 12 * STAGE_SCALE]}
             target={lightTarget}
             angle={0.8}
             penumbra={1}
@@ -2109,22 +2532,32 @@ useEffect(() => {
       )}
 
       {[[60, 60], [-60, 60], [60, -60], [-60, -60]].map(([x, z], i) => (
-        <mesh key={i} position={[x, 10, z]}><cylinderGeometry args={[0.2, 0.2, 20]} /><meshStandardMaterial emissive="#a855f7" emissiveIntensity={2} color="#a855f7" transparent opacity={0.3} /></mesh>
+        <mesh key={i} position={[x * STAGE_SCALE, 10, z * STAGE_SCALE]}><cylinderGeometry args={[0.2, 0.2, 20]} /><meshStandardMaterial emissive="#a855f7" emissiveIntensity={2} color="#a855f7" transparent opacity={0.3} /></mesh>
+      ))}
+
+      {/* purple border strip tracing the reachable square, connecting the corner pillars — only while the lamp is on */}
+      {lampOn && [
+        { pos: [0, 0.05, 60 * STAGE_SCALE], size: [120 * STAGE_SCALE + 0.4, 0.1, 0.6] },   // +z edge
+        { pos: [0, 0.05, -60 * STAGE_SCALE], size: [120 * STAGE_SCALE + 0.4, 0.1, 0.6] },  // -z edge
+        { pos: [60 * STAGE_SCALE, 0.05, 0], size: [0.6, 0.1, 120 * STAGE_SCALE + 0.4] },   // +x edge
+        { pos: [-60 * STAGE_SCALE, 0.05, 0], size: [0.6, 0.1, 120 * STAGE_SCALE + 0.4] },  // -x edge
+      ].map((edge, i) => (
+        <mesh key={i} position={edge.pos}><boxGeometry args={edge.size} /><meshStandardMaterial emissive="#a855f7" emissiveIntensity={2} color="#a855f7" transparent opacity={0.3} /></mesh>
       ))}
 
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow><planeGeometry args={[120, 120]} /><meshStandardMaterial color="#0a0a0a" roughness={0.8} /></mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow><planeGeometry args={[120 * STAGE_SCALE, 120 * STAGE_SCALE]} /><meshStandardMaterial color="#0a0a0a" roughness={0.8} /></mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]} receiveShadow><planeGeometry args={[5000, 5000]} /><meshStandardMaterial color="#391b1b" roughness={1} /></mesh>
 
-      <group position={[0, 0, -2]}>
+      <group position={[0, 0, -2 * STAGE_SCALE]}>
         <mesh position={[0, 1.5, 0]} receiveShadow castShadow><boxGeometry args={[9, 0.2, 5]} /><meshStandardMaterial color="#2d1b0d" /></mesh>
-        <Computer pcOn={pcOn} isSitting={isSitting} />
+        <Computer pcOn={pcOn} isSitting={view === 'room'} />
         <Peripherals />
       </group>
 
-      <Chair position={[0, 0, 4.2]} isInteractive={true} isHovered={isHovered.chair} />
+      <Chair position={[0, 0, 4.2 * STAGE_SCALE]} isInteractive={true} isHovered={isHovered.chair} />
 
-      <group ref={lampGroupRef} position={[-40, 1.5, 50]} userData={{ interactive: true, type: 'lamp' }}>
+      <group ref={lampGroupRef} position={[-40 * STAGE_SCALE, 1.5, 50 * STAGE_SCALE]} userData={{ interactive: true, type: 'lamp' }}>
         <mesh position={[0, 3, 0]} rotation={[0.4, 0, 0]}>
           <cylinderGeometry args={[0.5, 1, 1.5]} />
           <meshStandardMaterial ref={lampShadeMatRef} emissive={lampOn ? "#ccae3b" : "#442200"} emissiveIntensity={lampOn ? 2 : 0.1} color="#111" />
@@ -2134,7 +2567,7 @@ useEffect(() => {
       </group>
 
       <DetailedCat
-        targetPosition={catPosition === 'chair' ? [0, 1.8, 4.2] : [7, 0.4, -1]}
+        targetPosition={catPosition === 'chair' ? [0, 1.8, 4.2 * STAGE_SCALE] : [7 * STAGE_SCALE, 0.4, -1 * STAGE_SCALE]}
         active={!lampOn}
         isAtFireplace={catPosition === 'fireplace'}
         isHovered={isHovered.cat}
@@ -2144,6 +2577,22 @@ useEffect(() => {
       <HoopWithThrusters />
       <BasketballMesh meshRef={basketballRef} />
       <ConfettiEmitter active={confettiActive} />
+      <GrandPiano playable={view === 'piano'} onKeyPlayed={onPianoKeyPlayed} />
+      <PianoBench isHovered={isHovered.pianoBench} />
+      {pianoLightOn && (
+        <spotLight
+            position={[PIANO_POS[0], 25, PIANO_POS[2]]}
+            target={pianoLightTarget}
+            angle={0.6}
+            penumbra={1}
+            intensity={15}
+            distance={0}
+            decay={0}
+            color="#ffdaab"
+            castShadow
+            shadow-mapSize={[1024, 1024]}
+        />
+      )}
 
       {/* multisampling default is 8; the post HDR target's memory scales with
           sample count. Bloom already softens edges, so 4x is ~indistinguishable

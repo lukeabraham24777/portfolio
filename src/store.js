@@ -22,12 +22,14 @@ export const useStore = create((set) => ({
 
   })),
 
-  sitDown: () => set((state) => ({ 
+  sitDown: () => set((state) => ({
     // RULE: Only sit if cat has moved to the fireplace
-    view: state.catPosition === 'fireplace' ? 'room' : 'orbit' 
+    view: state.catPosition === 'fireplace' ? 'room' : 'orbit'
   })),
 
-  standUp: () => set({ 
+  sitAtPiano: () => set({ view: 'piano' }),
+
+  standUp: () => set({
   view: 'orbit'
 }),
 
