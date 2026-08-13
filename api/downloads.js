@@ -10,14 +10,29 @@ const ALLOWED_KEYS = new Set([
   'cmdtab:downloads',
 ])
 
+// Credential resolution, in priority order. Vercel's Redis marketplace
+// integration injects KV_REST_API_*; a hand-added pair (and .env.local for
+// local dev) uses UPSTASH_REDIS_REST_*. Accepting both means the same code runs
+// in either setup with no per-environment configuration.
+//
+// This endpoint only ever reads, so prefer the read-only token when the
+// integration provides one — nothing here should be able to write.
+const restUrl = () =>
+  process.env.UPSTASH_REDIS_REST_URL ||
+  process.env.KV_REST_API_URL
+const restToken = () =>
+  process.env.UPSTASH_REDIS_REST_TOKEN ||
+  process.env.KV_REST_API_READ_ONLY_TOKEN ||
+  process.env.KV_REST_API_TOKEN
+
 export default async function handler(req, res) {
   // TEMPORARY DIAGNOSTIC — delete this block once the counter is confirmed
   // working. Reports whether the runtime can see the credentials, never their
   // values: presence, length, the names of any UPSTASH-ish vars (catches typos
   // and stray whitespace), and which environment is actually serving.
   if (req.query?.debug === '1') {
-    const url = process.env.UPSTASH_REDIS_REST_URL || ''
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN || ''
+    const url = restUrl() || ''
+    const token = restToken() || ''
     return res.status(200).json({
       hasUrl: Boolean(url),
       hasToken: Boolean(token),
@@ -36,8 +51,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'unknown key' })
   }
 
-  const url = process.env.UPSTASH_REDIS_REST_URL
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN
+  const url = restUrl()
+  const token = restToken()
   if (!url || !token) {
     return res.status(500).json({ error: 'counter backend not configured' })
   }
