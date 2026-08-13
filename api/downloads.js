@@ -23,7 +23,9 @@ export default async function handler(req, res) {
       hasToken: Boolean(token),
       urlLength: url.length,
       tokenLength: token.length,
-      upstashishNames: Object.keys(process.env).filter(k => /upstash|redis/i.test(k)),
+      // Wide net: integration-injected credentials show up under names like
+      // KV_REST_API_URL just as often as UPSTASH_*.
+      upstashishNames: Object.keys(process.env).filter(k => /upstash|redis|kv_|rest_api/i.test(k)),
       vercelEnv: process.env.VERCEL_ENV ?? null,
       node: process.version,
     })
