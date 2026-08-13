@@ -58,10 +58,16 @@ const PROMPT_TOP_PX = 80  // pixels from the top of the viewport
 // Projects.exe window rebuilds itself automatically. `link` opens in a new tab
 // (the repo's homepage where one exists, else the GitHub repo); `repo` powers
 // the GitHub icon in each card's bottom-right corner.
+// A blurb may contain the token {downloads}: it is replaced at render time with
+// the live value of that entry's `downloadsKey` in Upstash Redis. Until the
+// request lands — or if it fails / the env vars are unset — `downloadsFallback`
+// is shown instead, so a card never renders a blank or a bogus 0.
 const PROJECTS = [
   {
     title: 'CmdTab',
-    blurb: 'Low-latency macOS window manager that unifies MRU tab, window, and application switching with window previews, on-click minimization, mic controls, and low-level system integrations unavailable natively on macOS. 25+ downloads',
+    blurb: 'Low-latency macOS window manager that unifies MRU tab, window, and application switching with window previews, on-click minimization, mic controls, and low-level system integrations unavailable natively on macOS. {downloads} downloads',
+    downloadsKey: 'cmdtab:downloads',
+    downloadsFallback: '25+',
     tech: ['Swift', 'JavaScript', 'Python', 'Shell'],
     link: 'https://cmd-tab.com',
     repo: 'https://github.com/lukeabraham24777/CmdTab',
@@ -281,9 +287,18 @@ const BENCH_POS = [
   0,
   PIANO_POS[2] + BENCH_LOCAL_OFFSET * PIANO_SCALE * Math.cos(PIANO_ROT_Y),
 ]
-// Camera target while sitting: eye height matches the desk chair's sit height; look toward the keyboard.
-const PIANO_BENCH_SIT_POS = new THREE.Vector3(BENCH_POS[0], 3.8, BENCH_POS[2])
-const PIANO_KEYBOARD_GAZE = new THREE.Vector3(PIANO_POS[0], 2.4, PIANO_POS[2]) // where the player should actually appear to look
+// Camera while sitting: hover above the bench-keyboard gap looking steeply down
+// at the keys, so all 88 keys face the mouse — far more natural to play than an
+// eye-level view. Coordinates are piano-local (same frame as the key meshes),
+// rotated/scaled into world space.
+const pianoLocalToWorld = (lx, ly, lz) => new THREE.Vector3(
+  PIANO_POS[0] + (lx * Math.cos(PIANO_ROT_Y) + lz * Math.sin(PIANO_ROT_Y)) * PIANO_SCALE,
+  ly * PIANO_SCALE,
+  PIANO_POS[2] + (-lx * Math.sin(PIANO_ROT_Y) + lz * Math.cos(PIANO_ROT_Y)) * PIANO_SCALE,
+)
+const PIANO_SIT_EYE_HEIGHT = 3.8 // world-units — matches the desk chair's seated eye height
+const PIANO_BENCH_SIT_POS = pianoLocalToWorld(0, 0, 1.1).setY(PIANO_SIT_EYE_HEIGHT) // over the bench's front half, leaning slightly in
+const PIANO_KEYBOARD_GAZE = pianoLocalToWorld(0, LEG_HEIGHT + 0.03, -0.18) // centre of the key bed
 // THREE.Object3D.lookAt() (unlike Camera.lookAt) orients -Z AWAY from its target — the same reason
 // the desk's own `deskLookAt` sits on the far side of `sitPos` from the monitor. Mirror the real
 // gaze point through the sit position so the reversal cancels out and the camera faces the piano.
@@ -1343,14 +1358,15 @@ const MailIcon = (p) => (
 )
 const CONTACT_ICONS = { github: GithubIcon, linkedin: LinkedinIcon, email: MailIcon }
 
-const ContactTile = ({ type, label, href, sub }) => {
+const ContactTile = ({ type, label, href, sub, onOpenLink }) => {
   const [h, setH] = useState(false)
   const Icon = CONTACT_ICONS[type]
   const isMail = href.startsWith('mailto:')
   return (
     <a
       href={href}
-      target={isMail ? undefined : '_blank'}
+      // mailto: hands off to the mail client natively; web links open in the in-OS browser
+      onClick={isMail ? undefined : (e) => { e.preventDefault(); onOpenLink(href) }}
       rel="noreferrer"
       onMouseEnter={() => setH(true)}
       onMouseLeave={() => setH(false)}
@@ -1397,43 +1413,101 @@ const AppTile = ({ app, onOpen }) => {
   )
 }
 
-// Shared window chrome — hosts the top-left BACK button every sub-screen needs
-const WindowChrome = ({ title, accent, onBack, right, children }) => {
+// Small accent-outlined chrome button — BACK, HOME, and friends share this look
+const ChromeButton = ({ accent, onClick, children }) => {
   const [bh, setBh] = useState(false)
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', zIndex: 20 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
-        borderBottom: `1px solid ${accent}55`, background: 'rgba(0,0,0,0.35)', flexShrink: 0,
-      }}>
-        {/* ← top-left back button */}
-        <button
-          onClick={onBack}
-          onMouseEnter={() => setBh(true)}
-          onMouseLeave={() => setBh(false)}
-          style={{
-            cursor: 'pointer', background: bh ? accent : 'transparent',
-            color: bh ? '#0a0f1a' : accent, border: `2px solid ${accent}`, borderRadius: '6px',
-            padding: '5px 12px', fontFamily: "'Courier New', monospace", fontWeight: 'bold',
-            fontSize: '12px', boxShadow: `0 0 10px ${accent}55`, transition: 'all 0.15s ease',
-          }}
-        >
-          ‹ BACK
-        </button>
-        <span style={{ color: accent, fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px', textShadow: `0 0 10px ${accent}` }}>{title}</span>
-        <span style={{ marginLeft: 'auto' }}>{right}</span>
-      </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
-        {children}
-      </div>
-    </div>
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setBh(true)}
+      onMouseLeave={() => setBh(false)}
+      style={{
+        cursor: 'pointer', background: bh ? accent : 'transparent',
+        color: bh ? '#0a0f1a' : accent, border: `2px solid ${accent}`, borderRadius: '6px',
+        padding: '5px 12px', fontFamily: "'Courier New', monospace", fontWeight: 'bold',
+        fontSize: '12px', boxShadow: `0 0 10px ${accent}55`, transition: 'all 0.15s ease',
+        whiteSpace: 'nowrap', flexShrink: 0,
+      }}
+    >
+      {children}
+    </button>
   )
 }
 
+// Shared window chrome — hosts the top-left BACK button every sub-screen needs.
+// `left` renders extra top-left controls right after BACK (the browser's HOME).
+const WindowChrome = ({ title, accent, onBack, left, right, children }) => (
+  <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', zIndex: 20 }}>
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+      borderBottom: `1px solid ${accent}55`, background: 'rgba(0,0,0,0.35)', flexShrink: 0,
+    }}>
+      <ChromeButton accent={accent} onClick={onBack}>‹ BACK</ChromeButton>
+      {left}
+      <span style={{ color: accent, fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px', textShadow: `0 0 10px ${accent}`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+      <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{right}</span>
+    </div>
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
+      {children}
+    </div>
+  </div>
+)
+
+// ── BROWSER.EXE — hyperlinks open here, on the virtual screen, not a new tab ──
+// YouTube pages refuse to be framed, but their /embed/ player variant allows it —
+// rewrite those URLs. Sites that hard-deny framing (github.com, linkedin.com)
+// show their refusal notice in-frame; the ⧉ NEW TAB escape hatch covers them.
+const toEmbeddable = (url) => {
+  const yt = url.match(/youtube\.com\/(?:watch\?v=|shorts\/|embed\/)([\w-]+)/)
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`
+  return url
+}
+const BrowserView = ({ url }) => (
+  <div style={{ position: 'absolute', inset: 0, background: '#0d1117' }}>
+    {/* sits behind the iframe — visible only while the page is loading */}
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '30px', textAlign: 'center' }}>
+      <p style={{ color: '#475569', fontSize: '12px', lineHeight: 1.7, margin: 0 }}>
+        CONNECTING TO {url.replace(/^https?:\/\//, '').split('/')[0].toUpperCase()}…<br />
+        If nothing appears, the site refuses to render in-frame — use ⧉ NEW TAB above.
+      </p>
+    </div>
+    <iframe
+      title="Browser"
+      src={toEmbeddable(url)}
+      allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
+    />
+  </div>
+)
+
+// ── LIVE COUNTERS — read via /api/downloads (see api/downloads.js) ──
+// The Upstash credentials deliberately live server-side only: this fetch is
+// public and unauthenticated, and the serverless function decides which keys
+// it is willing to read.
+// Returns the number stored at `key`, or null while loading / on any failure.
+const useRedisCount = (key) => {
+  const [count, setCount] = useState(null)
+  useEffect(() => {
+    if (!key) return
+    const ctrl = new AbortController()
+    fetch(`/api/downloads?key=${encodeURIComponent(key)}`, { signal: ctrl.signal })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(({ count }) => { if (Number.isFinite(count)) setCount(count) })
+      .catch(e => { if (e.name !== 'AbortError') console.warn(`[${key}] live count unavailable:`, e.message) })
+    return () => ctrl.abort()
+  }, [key])
+  return count
+}
+
 // ── PROJECTS.EXE — rebuilds from the PROJECTS array (fully modular) ──
-const ProjectCard = ({ p }) => {
+const ProjectCard = ({ p, onOpenLink }) => {
   const [h, setH] = useState(false)
   const [ghHover, setGhHover] = useState(false)
+  const downloads = useRedisCount(p.downloadsKey)
+  const blurb = p.downloadsKey
+    ? p.blurb.replace('{downloads}', downloads === null ? p.downloadsFallback : downloads.toLocaleString())
+    : p.blurb
+  const intercept = (url) => (e) => { e.preventDefault(); onOpenLink(url) }
   return (
     <div
       onMouseEnter={() => setH(true)}
@@ -1449,10 +1523,10 @@ const ProjectCard = ({ p }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }}>
         <h3 style={{ margin: 0, color: '#38bdf8', fontSize: '16px', textShadow: '0 0 8px rgba(56,189,248,0.5)' }}>{p.title}</h3>
         {p.link && (
-          <a href={p.link} target="_blank" rel="noreferrer" style={{ color: '#4ade80', fontSize: '11px', textDecoration: 'none', fontWeight: 'bold', whiteSpace: 'nowrap' }}>VIEW →</a>
+          <a href={p.link} onClick={intercept(p.link)} style={{ color: '#4ade80', fontSize: '11px', textDecoration: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', cursor: 'pointer' }}>VIEW →</a>
         )}
       </div>
-      <p style={{ margin: '8px 0 10px', fontSize: '12px', lineHeight: 1.5, color: '#cbd5e1' }}>{p.blurb}</p>
+      <p style={{ margin: '8px 0 10px', fontSize: '12px', lineHeight: 1.5, color: '#cbd5e1' }}>{blurb}</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', paddingRight: '28px' }}>
         {p.tech.map(t => (
           <span key={t} style={{ fontSize: '10px', color: '#94a3b8', border: '1px solid #334155', borderRadius: '4px', padding: '2px 7px' }}>{t}</span>
@@ -1460,12 +1534,12 @@ const ProjectCard = ({ p }) => {
       </div>
       {p.repo && (
         <a
-          href={p.repo} target="_blank" rel="noreferrer" title="View source on GitHub"
+          href={p.repo} onClick={intercept(p.repo)} title="View source on GitHub"
           onMouseEnter={() => setGhHover(true)}
           onMouseLeave={() => setGhHover(false)}
           style={{
             position: 'absolute', bottom: '10px', right: '12px', display: 'flex',
-            color: ghHover ? '#e2e8f0' : '#64748b', transition: 'color 0.2s ease',
+            color: ghHover ? '#e2e8f0' : '#64748b', transition: 'color 0.2s ease', cursor: 'pointer',
           }}
         >
           <GithubIcon width={18} height={18} />
@@ -1474,9 +1548,9 @@ const ProjectCard = ({ p }) => {
     </div>
   )
 }
-const ProjectsView = () => (
+const ProjectsView = ({ onOpenLink }) => (
   <div style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-    {PROJECTS.map((p, i) => <ProjectCard key={i} p={p} />)}
+    {PROJECTS.map((p, i) => <ProjectCard key={i} p={p} onOpenLink={onOpenLink} />)}
   </div>
 )
 
@@ -1490,15 +1564,15 @@ const ResumeView = () => (
 )
 
 // ── CONTACT.SH — calm monochrome social links ──
-const ContactView = () => (
+const ContactView = ({ onOpenLink }) => (
   <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', gap: '24px' }}>
     <div style={{ textAlign: 'center' }}>
       <h2 style={{ margin: 0, color: '#e6edf6', fontSize: '20px', letterSpacing: '3px' }}>LET&apos;S CONNECT</h2>
       <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#94a3b8' }}>Reach me through any of these channels.</p>
     </div>
     <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'center' }}>
-      <ContactTile type="github"   label="GITHUB"   href={CONTACT.github.url}   sub={CONTACT.github.handle} />
-      <ContactTile type="linkedin" label="LINKEDIN" href={CONTACT.linkedin.url} sub={CONTACT.linkedin.handle} />
+      <ContactTile type="github"   label="GITHUB"   href={CONTACT.github.url}   sub={CONTACT.github.handle}   onOpenLink={onOpenLink} />
+      <ContactTile type="linkedin" label="LINKEDIN" href={CONTACT.linkedin.url} sub={CONTACT.linkedin.handle} onOpenLink={onOpenLink} />
       <ContactTile type="email"    label="EMAIL"    href={CONTACT.email.url}    sub={CONTACT.email.handle} />
     </div>
   </div>
@@ -1507,9 +1581,12 @@ const ContactView = () => (
 const Computer = ({ pcOn, isSitting }) => {
   const screenMat = useRef()
   const [screen, setScreen] = useState('home') // 'home' | 'projects' | 'resume' | 'contact'
+  // In-OS browser: non-null = a hyperlink is open on the virtual screen.
+  // `screen` keeps the app that launched it, so BACK lands where you left off.
+  const [browserUrl, setBrowserUrl] = useState(null)
 
   // Always boot back to the desktop whenever the PC is powered off
-  useEffect(() => { if (!pcOn) setScreen('home') }, [pcOn])
+  useEffect(() => { if (!pcOn) { setScreen('home'); setBrowserUrl(null) } }, [pcOn])
 
   useFrame((state, delta) => {
     if (screenMat.current) {
@@ -1581,7 +1658,7 @@ const Computer = ({ pcOn, isSitting }) => {
             )}
 
             {/* SUB-WINDOWS — each carries the top-left BACK button via WindowChrome */}
-            {screen !== 'home' && (
+            {screen !== 'home' && !browserUrl && (
               <WindowChrome
                 title={titles[screen]}
                 accent={accents[screen]}
@@ -1596,9 +1673,30 @@ const Computer = ({ pcOn, isSitting }) => {
                   </a>
                 ) : null}
               >
-                {screen === 'projects' && <ProjectsView />}
+                {screen === 'projects' && <ProjectsView onOpenLink={setBrowserUrl} />}
                 {screen === 'resume' && <ResumeView />}
-                {screen === 'contact' && <ContactView />}
+                {screen === 'contact' && <ContactView onOpenLink={setBrowserUrl} />}
+              </WindowChrome>
+            )}
+
+            {/* BROWSER — hyperlinks render here instead of a new tab. Top-left
+                overlay: BACK returns to the launching app, HOME to the desktop. */}
+            {browserUrl && (
+              <WindowChrome
+                title={browserUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                accent="#38bdf8"
+                onBack={() => setBrowserUrl(null)}
+                left={<ChromeButton accent="#38bdf8" onClick={() => { setBrowserUrl(null); setScreen('home') }}>⌂ HOME</ChromeButton>}
+                right={
+                  <a
+                    href={browserUrl} target="_blank" rel="noreferrer"
+                    style={{ color: '#38bdf8', border: '2px solid #38bdf8', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 'bold', textDecoration: 'none', boxShadow: '0 0 10px #38bdf855', whiteSpace: 'nowrap' }}
+                  >
+                    ⧉ NEW TAB
+                  </a>
+                }
+              >
+                <BrowserView url={browserUrl} />
               </WindowChrome>
             )}
 
