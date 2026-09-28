@@ -110,6 +110,8 @@ const CONTACT = {
 }
 
 const RESUME_URL = '/resume.pdf'
+// Casual gate only — the PDF itself is still publicly reachable at RESUME_URL.
+const RESUME_PIN = 'duck'
 // ────────────────────────────────────────────────────────────────────────────
 
 // ─── BASKETBALL CONSTANTS — adjust to tune gameplay ──────────────────────
@@ -1563,6 +1565,52 @@ const ResumeView = () => (
   />
 )
 
+// ── RESUME LOCK — PIN prompt shown before the résumé renders ──
+const ResumeLock = ({ onUnlock }) => {
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState(false)
+  const submit = (e) => {
+    e.preventDefault()
+    if (pin.trim().toLowerCase() === RESUME_PIN) onUnlock()
+    else { setError(true); setPin('') }
+  }
+  // Keep typing from reaching the window-level scene shortcuts (e.g. '=' toggles
+  // the stats HUD) — ESC still passes through so the player can stand up.
+  const swallowKeys = (e) => { if (e.key !== 'Escape') e.nativeEvent.stopPropagation() }
+  return (
+    <form
+      onSubmit={submit}
+      style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '14px', padding: '24px' }}
+    >
+      <div style={{ fontSize: '32px', color: '#a855f7', textShadow: '0 0 12px #a855f7' }}>🔒</div>
+      <h2 style={{ margin: 0, color: '#e6edf6', fontSize: '18px', letterSpacing: '3px' }}>ACCESS RESTRICTED</h2>
+      <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>Enter PIN to view résumé.</p>
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <input
+          type="password" autoFocus value={pin} placeholder="PIN"
+          onChange={(e) => { setPin(e.target.value); setError(false) }}
+          onKeyDown={swallowKeys} onKeyUp={swallowKeys}
+          style={{
+            background: 'rgba(0,0,0,0.4)', color: '#e6edf6', border: `2px solid ${error ? '#f87171' : '#a855f7'}`,
+            borderRadius: '6px', padding: '6px 12px', fontFamily: "'Courier New', monospace", fontSize: '14px',
+            letterSpacing: '4px', width: '160px', outline: 'none',
+          }}
+        />
+        <button
+          type="submit"
+          style={{
+            cursor: 'pointer', background: '#a855f7', color: '#0a0f1a', border: '2px solid #a855f7', borderRadius: '6px',
+            padding: '6px 14px', fontFamily: "'Courier New', monospace", fontWeight: 'bold', fontSize: '12px',
+          }}
+        >
+          UNLOCK
+        </button>
+      </div>
+      <p style={{ margin: 0, minHeight: '14px', fontSize: '11px', color: '#f87171' }}>{error ? 'ACCESS DENIED' : ''}</p>
+    </form>
+  )
+}
+
 // ── CONTACT.SH — calm monochrome social links ──
 const ContactView = ({ onOpenLink }) => (
   <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', gap: '24px' }}>
@@ -1584,9 +1632,10 @@ const Computer = ({ pcOn, isSitting }) => {
   // In-OS browser: non-null = a hyperlink is open on the virtual screen.
   // `screen` keeps the app that launched it, so BACK lands where you left off.
   const [browserUrl, setBrowserUrl] = useState(null)
+  const [resumeUnlocked, setResumeUnlocked] = useState(false)
 
-  // Always boot back to the desktop whenever the PC is powered off
-  useEffect(() => { if (!pcOn) { setScreen('home'); setBrowserUrl(null) } }, [pcOn])
+  // Always boot back to the desktop (and re-lock) whenever the PC is powered off
+  useEffect(() => { if (!pcOn) { setScreen('home'); setBrowserUrl(null); setResumeUnlocked(false) } }, [pcOn])
 
   useFrame((state, delta) => {
     if (screenMat.current) {
@@ -1663,7 +1712,7 @@ const Computer = ({ pcOn, isSitting }) => {
                 title={titles[screen]}
                 accent={accents[screen]}
                 onBack={() => setScreen('home')}
-                right={screen === 'resume' ? (
+                right={screen === 'resume' && resumeUnlocked ? (
                   <a
                     href={RESUME_URL}
                     download
@@ -1674,7 +1723,7 @@ const Computer = ({ pcOn, isSitting }) => {
                 ) : null}
               >
                 {screen === 'projects' && <ProjectsView onOpenLink={setBrowserUrl} />}
-                {screen === 'resume' && <ResumeView />}
+                {screen === 'resume' && (resumeUnlocked ? <ResumeView /> : <ResumeLock onUnlock={() => setResumeUnlocked(true)} />)}
                 {screen === 'contact' && <ContactView onOpenLink={setBrowserUrl} />}
               </WindowChrome>
             )}
