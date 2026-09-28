@@ -109,9 +109,9 @@ const CONTACT = {
   email:    { url: 'mailto:lukeabraham06@gmail.com',          handle: 'lukeabraham06@gmail.com' },
 }
 
-const RESUME_URL = '/resume.pdf'
-// Casual gate only — the PDF itself is still publicly reachable at RESUME_URL.
-const RESUME_PIN = 'duck'
+// PIN-gated: the PIN is checked server-side, which returns the decrypted PDF
+// (see api/resume.js). Nothing secret lives in the client bundle.
+const RESUME_API = '/api/resume'
 // ────────────────────────────────────────────────────────────────────────────
 
 // ─── BASKETBALL CONSTANTS — adjust to tune gameplay ──────────────────────
@@ -1557,22 +1557,40 @@ const ProjectsView = ({ onOpenLink }) => (
 )
 
 // ── RESUME.PDF — native browser PDF viewer (zoom / scroll / download) ──
-const ResumeView = () => (
+// `url` is an object URL for the PDF blob returned by RESUME_API.
+const ResumeView = ({ url }) => (
   <iframe
     title="Resume"
-    src={`${RESUME_URL}#view=FitH`}
+    src={`${url}#view=FitH`}
     style={{ width: '100%', height: '100%', border: 'none', background: '#525659', display: 'block' }}
   />
 )
 
 // ── RESUME LOCK — PIN prompt shown before the résumé renders ──
+// On success hands the decrypted PDF (as a Blob) to onUnlock.
+const RESUME_ERRORS = { 401: 'ACCESS DENIED', 429: 'TOO MANY ATTEMPTS — TRY LATER' }
 const ResumeLock = ({ onUnlock }) => {
   const [pin, setPin] = useState('')
-  const [error, setError] = useState(false)
-  const submit = (e) => {
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const submit = async (e) => {
     e.preventDefault()
-    if (pin.trim().toLowerCase() === RESUME_PIN) onUnlock()
-    else { setError(true); setPin('') }
+    if (busy || !pin) return
+    setBusy(true)
+    try {
+      const r = await fetch(RESUME_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      })
+      if (r.ok) return onUnlock(await r.blob())
+      setError(RESUME_ERRORS[r.status] || 'SYSTEM ERROR — TRY LATER')
+    } catch {
+      setError('CONNECTION FAILED')
+    } finally {
+      setBusy(false)
+    }
+    setPin('')
   }
   // Keep typing from reaching the window-level scene shortcuts (e.g. '=' toggles
   // the stats HUD) — ESC still passes through so the player can stand up.
@@ -1588,7 +1606,7 @@ const ResumeLock = ({ onUnlock }) => {
       <div style={{ display: 'flex', gap: '10px' }}>
         <input
           type="password" autoFocus value={pin} placeholder="PIN"
-          onChange={(e) => { setPin(e.target.value); setError(false) }}
+          onChange={(e) => { setPin(e.target.value); setError(null) }}
           onKeyDown={swallowKeys} onKeyUp={swallowKeys}
           style={{
             background: 'rgba(0,0,0,0.4)', color: '#e6edf6', border: `2px solid ${error ? '#f87171' : '#a855f7'}`,
@@ -1597,16 +1615,16 @@ const ResumeLock = ({ onUnlock }) => {
           }}
         />
         <button
-          type="submit"
+          type="submit" disabled={busy}
           style={{
             cursor: 'pointer', background: '#a855f7', color: '#0a0f1a', border: '2px solid #a855f7', borderRadius: '6px',
             padding: '6px 14px', fontFamily: "'Courier New', monospace", fontWeight: 'bold', fontSize: '12px',
           }}
         >
-          UNLOCK
+          {busy ? '…' : 'UNLOCK'}
         </button>
       </div>
-      <p style={{ margin: 0, minHeight: '14px', fontSize: '11px', color: '#f87171' }}>{error ? 'ACCESS DENIED' : ''}</p>
+      <p style={{ margin: 0, minHeight: '14px', fontSize: '11px', color: '#f87171' }}>{error || ''}</p>
     </form>
   )
 }
@@ -1632,10 +1650,13 @@ const Computer = ({ pcOn, isSitting }) => {
   // In-OS browser: non-null = a hyperlink is open on the virtual screen.
   // `screen` keeps the app that launched it, so BACK lands where you left off.
   const [browserUrl, setBrowserUrl] = useState(null)
-  const [resumeUnlocked, setResumeUnlocked] = useState(false)
+  // Object URL of the unlocked résumé PDF; null = locked
+  const [resumeUrl, setResumeUrl] = useState(null)
+  const unlockResume = (blob) => setResumeUrl(URL.createObjectURL(blob))
+  useEffect(() => () => { if (resumeUrl) URL.revokeObjectURL(resumeUrl) }, [resumeUrl])
 
   // Always boot back to the desktop (and re-lock) whenever the PC is powered off
-  useEffect(() => { if (!pcOn) { setScreen('home'); setBrowserUrl(null); setResumeUnlocked(false) } }, [pcOn])
+  useEffect(() => { if (!pcOn) { setScreen('home'); setBrowserUrl(null); setResumeUrl(null) } }, [pcOn])
 
   useFrame((state, delta) => {
     if (screenMat.current) {
@@ -1712,10 +1733,10 @@ const Computer = ({ pcOn, isSitting }) => {
                 title={titles[screen]}
                 accent={accents[screen]}
                 onBack={() => setScreen('home')}
-                right={screen === 'resume' && resumeUnlocked ? (
+                right={screen === 'resume' && resumeUrl ? (
                   <a
-                    href={RESUME_URL}
-                    download
+                    href={resumeUrl}
+                    download="resume.pdf"
                     style={{ color: '#a855f7', border: '2px solid #a855f7', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 'bold', textDecoration: 'none', boxShadow: '0 0 10px #a855f755' }}
                   >
                     ↓ DOWNLOAD
@@ -1723,7 +1744,7 @@ const Computer = ({ pcOn, isSitting }) => {
                 ) : null}
               >
                 {screen === 'projects' && <ProjectsView onOpenLink={setBrowserUrl} />}
-                {screen === 'resume' && (resumeUnlocked ? <ResumeView /> : <ResumeLock onUnlock={() => setResumeUnlocked(true)} />)}
+                {screen === 'resume' && (resumeUrl ? <ResumeView url={resumeUrl} /> : <ResumeLock onUnlock={unlockResume} />)}
                 {screen === 'contact' && <ContactView onOpenLink={setBrowserUrl} />}
               </WindowChrome>
             )}
