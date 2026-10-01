@@ -1,0 +1,18 @@
+// Cloudflare Workers config.
+// Build command: npm run build   Deploy command: npx wrangler deploy
+// Static files come from the Vite build (dist/); anything that isn't a file
+// (/api/resume, /api/downloads) runs worker/index.js.
+//
+// Secrets to add in the Cloudflare dashboard (Settings → Variables and Secrets):
+//   RESUME_PIN, RESUME_KEY, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "portfolio",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-01",
+  // node:crypto + Buffer for the résumé decrypt, and env vars exposed as process.env.
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "dist"
+  }
+}
