@@ -41,7 +41,6 @@ Personal site: a React + three.js (react-three-fiber) "cottage" scene built with
 - No test suite and no TypeScript.
 
 ## Gotchas
-- `api/downloads.js` still has a "TEMPORARY DIAGNOSTIC" `?debug=1` branch that reports env var names/lengths (never values); remove once no longer needed.
 - Never expose Upstash or résumé secrets with a `VITE_` prefix — Vite inlines those into the public bundle.
 - The handlers must stay compatible with the adapter: only `setHeader`, `status`, `json`, `send` and JSON bodies are supported.
 - `dist/` is git-ignored build output.

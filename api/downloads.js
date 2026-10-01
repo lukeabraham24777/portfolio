@@ -26,26 +26,6 @@ const restToken = () =>
   process.env.KV_REST_API_TOKEN
 
 export default async function handler(req, res) {
-  // TEMPORARY DIAGNOSTIC — delete this block once the counter is confirmed
-  // working. Reports whether the runtime can see the credentials, never their
-  // values: presence, length, the names of any UPSTASH-ish vars (catches typos
-  // and stray whitespace), and which environment is actually serving.
-  if (req.query?.debug === '1') {
-    const url = restUrl() || ''
-    const token = restToken() || ''
-    return res.status(200).json({
-      hasUrl: Boolean(url),
-      hasToken: Boolean(token),
-      urlLength: url.length,
-      tokenLength: token.length,
-      // Wide net: integration-injected credentials show up under names like
-      // KV_REST_API_URL just as often as UPSTASH_*.
-      upstashishNames: Object.keys(process.env).filter(k => /upstash|redis|kv_|rest_api/i.test(k)),
-      vercelEnv: process.env.VERCEL_ENV ?? null,
-      node: process.version,
-    })
-  }
-
   const key = req.query?.key
   if (!ALLOWED_KEYS.has(key)) {
     return res.status(400).json({ error: 'unknown key' })
